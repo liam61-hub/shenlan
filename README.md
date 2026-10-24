@@ -1,10 +1,10 @@
-# 深蓝（shenlan）
+# shenlan
 
-运行在本地终端上的开源 Agent 工作台：模型自带（BYOK），会话、密钥和记忆默认保存在本机。调用模型时，请求内容会发送给你配置的模型服务商。深蓝兼容 OpenAI 兼容端点，内置多模型路由、成本护栏和动作安全网。
+An open-source agent workspace for your local terminal: bring your own keys (BYOK), with sessions, secrets, and memories stored on your machine by default. When the model is called, request content is sent to the model provider you configure. shenlan speaks the OpenAI-compatible protocol and ships with multi-model routing, cost guardrails, and an action safety net.
 
-> 📖 详细使用手册（多模型路由 / 权限与安全网 / 成本预算 / MCP·Skill·长任务）：[docs/user-guide.md](docs/user-guide.md)
+> 📖 中文文档：[README.zh-CN.md](README.zh-CN.md) · Full user manual (routing / permissions & safety / cost budgets / MCP·Skill·long tasks): [docs/user-guide.md](docs/user-guide.md)
 
-## 从源码运行
+## Run from source
 
 ```bash
 git clone https://github.com/liam61-hub/shenlan.git
@@ -15,107 +15,107 @@ node packages/cli/dist/index.js --version
 node packages/cli/dist/index.js
 ```
 
-需要 Node.js 22+。公开 npm 包尚未发布；已有私有包用户继续使用各自的本机 registry 配置。源码更新请从 GitHub 拉取后重新构建。
+Requires Node.js 22+. No public npm package yet; to update a source install, pull from GitHub and rebuild.
 
-## 参与贡献与报告漏洞
+## Contributing & reporting vulnerabilities
 
-提交改动请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。普通问题使用 [GitHub Issues](https://github.com/liam61-hub/shenlan/issues)；安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，避免公开漏洞细节。
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Use [GitHub Issues](https://github.com/liam61-hub/shenlan/issues) for general questions and [SECURITY.md](SECURITY.md) for private vulnerability reports — do not disclose vulnerability details publicly.
 
-## 快速开始
+## Quick start
 
-### 首次使用（3 分钟上手）
+### First use (3 minutes)
 
-1. 安装完成后运行 `shenlan`。首次启动会自动生成两个配置目录（内含配置样例）：
-   - 全局 `~/.shenlan/`：`config.json` + `config.sample.json` + `README.md` + `env.example`
-   - 项目 `.shenlan/`：同上（在新目录第一次使用 CLI 时自动生成）
-2. 未配置 API Key 时，欢迎引导自动弹出：`Enter` 进入配置 → 粘贴 Key → `Enter` 保存（自动测连通性）→ 展示快速上手（`/model` `/goal` `/security` `/keys` `/help`）→ `Enter` 开始使用。可随时 `Esc` 跳过，之后用 `/keys` 或 `shenlan --setup` 再配。
-3. 直接输入问题开始对话；`/help` 查看全部命令，`Shift+Tab` 切换权限模式。
+1. After installing, run `shenlan`. On first launch two config directories are created (with samples):
+   - Global `~/.shenlan/`: `config.json` + `config.sample.json` + `README.md` + `env.example`
+   - Project `.shenlan/`: the same, created the first time the CLI runs in a new directory
+2. With no API key configured, the onboarding prompt appears automatically: `Enter` to configure → paste your key → `Enter` to save (connectivity is tested automatically) → quick tour (`/model` `/goal` `/security` `/keys` `/help`) → `Enter` to start. You can skip with `Esc` at any time and configure later via `/keys` or `shenlan --setup`.
+3. Type a question to start a conversation; `/help` lists all commands; `Shift+Tab` switches permission modes.
 
-### 配置 API Key（5 种方式）
+### Configuring API keys (5 ways)
 
-优先级：真实环境变量 > 项目 `.env` > 全局 `~/.shenlan/.env` > 项目配置 > 全局配置。
+Precedence: real environment variables > project `.env` > global `~/.shenlan/.env` > project config > global config.
 
-1. **界面配置**：首次运行欢迎引导、`/keys` 面板（掩码显示、支持粘贴、保存后自动测连通性、`g`/`p` 切全局/项目作用域）、`shenlan --setup` 向导。
-2. **命令行配置**：`shenlan config` 列出全部配置项与环境变量（敏感值掩码），`shenlan config set/get/unset` 修改配置（与 TUI 内 `/config` 等价）：
+1. **Interactive UI**: the first-run onboarding, the `/keys` panel (masked display, paste support, automatic connectivity test after saving, `g`/`p` to switch global/project scope), or the `shenlan --setup` wizard.
+2. **CLI commands**: `shenlan config` lists all config keys and environment variables (sensitive values masked); `shenlan config set/get/unset` edits configuration (equivalent to `/config` in the TUI):
    ```bash
    shenlan config set providerKeys.deepseek sk-xxx --global
-   shenlan config set language zh-CN --global   # 界面语言（默认 en）
+   shenlan config set language zh-CN --global   # UI language (default en)
    shenlan config get model.model
    ```
-3. **手动编辑配置文件**：在 `~/.shenlan/config.json`（全局）或 `.shenlan/config.json`（项目）写 `providerKeys`：
+3. **Edit config files**: write `providerKeys` in `~/.shenlan/config.json` (global) or `.shenlan/config.json` (project):
    ```json
    { "providerKeys": { "deepseek": "sk-xxx", "qwen": "sk-xxx" } }
    ```
-   字段说明与完整样例见 `~/.shenlan/config.sample.json` 与 `~/.shenlan/README.md`。
-4. **环境变量**：通用规则 `<PROVIDER>_API_KEY`，`SHENLAN_API_KEY` 为通用 fallback。环境变量优先级最高。
+   Field descriptions and full samples: `~/.shenlan/config.sample.json` and `~/.shenlan/README.md`.
+4. **Environment variables**: the general rule is `<PROVIDER>_API_KEY`, with `SHENLAN_API_KEY` as a generic fallback. Environment variables take the highest precedence.
    ```bash
    export DEEPSEEK_API_KEY=sk-xxx
-   # 或通用 fallback
+   # or the generic fallback
    export SHENLAN_API_KEY=sk-xxx
    ```
-5. **.env 文件**：项目 `cwd/.env` 或全局 `~/.shenlan/.env` 写 `KEY=VALUE`；真实环境变量优先，项目 `.env` 优先于全局 `.env`。格式样例见 `.shenlan/env.example`。
+5. **`.env` files**: `KEY=VALUE` in project `cwd/.env` or global `~/.shenlan/.env`; real environment variables win, and the project `.env` overrides the global one. See `.shenlan/env.example`.
    ```bash
    DEEPSEEK_API_KEY=sk-xxx
    QWEN_API_KEY=sk-xxx
    ```
 
-> ⚠️ `.env*` 与 `.shenlan/config.json` 会被提交时安全检查（`shenlan security` / pre-commit 钩子）拦截，不要提交到 git。
+> ⚠️ `.env*` and `.shenlan/config.json` are blocked by the commit-time security check (`shenlan security` / pre-commit hook) — do not commit them to git.
 
-### 验证
+### Verify
 
 ```bash
-# 启动交互式 REPL
+# Start the interactive REPL
 shenlan
 
-# 或单次任务
-shenlan run "读取 README.md，总结一下项目功能"
-shenlan run --readonly "读取 README.md，总结一下项目功能"   # readonly 仅放行 read/search 工具
+# Or a one-shot task
+shenlan run "Read README.md and summarize the project's capabilities"
+shenlan run --readonly "Read README.md and summarize the project's capabilities"   # readonly allows read/search tools only
 ```
 
-## 日常使用
+## Daily use
 
 ```bash
-# 交互模式
-shenlan                          # 进入 REPL，对话式交互
-shenlan --continue               # 继续上次会话
-shenlan --resume <id>            # 恢复指定会话
+# Interactive mode
+shenlan                          # Enter the REPL for conversational interaction
+shenlan --continue               # Continue the last session
+shenlan --resume <id>            # Resume a specific session
 
-# 单任务模式
-shenlan run "修复 src/index.ts 的类型错误"
-shenlan run --readonly "巡检项目状态"
+# One-shot task mode
+shenlan run "Fix the type errors in src/index.ts"
+shenlan run --readonly "Inspect project status"
 
-# 首次设置向导
+# First-time setup wizard
 shenlan --setup
 
-# 查看 / 修改配置（同 /config，敏感值掩码）
+# View / edit configuration (same as /config; sensitive values masked)
 shenlan config
 shenlan config set agent.maxSteps 100
 
-# 查看版本
+# Show version
 shenlan --version
 ```
 
-### REPL 交互示例
+### REPL interaction examples
 
 ```
-❯ 帮我创建一个新的 skill
-❯ 读取 package.json，看看有哪些依赖
-❯ /plan               进入规划模式，先只读分析
-❯ /keys               配置 / 查看 API Key（掩码显示）
-❯ /config             交互配置面板：←/→ 切换，Enter 编辑，改完即生效
-❯ /goal 把全部测试跑绿   长任务目标模式（完成自动收尾）
-❯ /security           提交时安全检查（pre-commit 钩子）
-❯ /cost               查看 token 消耗
-❯ /budget             成本护栏状态（进度 / 豁免 / goal）
-❯ /undo               撤销上次文件修改
-❯ Shift+Tab           切换权限模式
+❯ Create a new skill for me
+❯ Read package.json and list the dependencies
+❯ /plan               Enter plan mode for read-only analysis first
+❯ /keys               Configure / view API keys (masked)
+❯ /config             Interactive config panel: ←/→ to switch, Enter to edit, effective immediately
+❯ /goal Make all tests pass    Long-task goal mode (auto-wraps up on completion)
+❯ /security           Commit-time security check (pre-commit hook)
+❯ /cost               View token consumption
+❯ /budget             Cost guardrail status (progress / waive / goal)
+❯ /undo               Undo the last file modification
+❯ Shift+Tab           Switch permission mode
 ```
 
-### 配置 MCP Server
+### Configuring MCP servers
 
-编辑 `~/.shenlan/config.json`（全局）或 `.shenlan/config.json`（项目），添加 `mcpServers`：
+Edit `~/.shenlan/config.json` (global) or `.shenlan/config.json` (project) and add `mcpServers`:
 
-**HTTP 方式：**
+**HTTP transport:**
 
 ```json
 {
@@ -130,7 +130,7 @@ shenlan --version
 }
 ```
 
-**stdio 方式（本地命令行启动）：**
+**stdio transport (launched as a local command):**
 
 ```json
 {
@@ -147,156 +147,156 @@ shenlan --version
 }
 ```
 
-启动后 MCP 工具自动注册，工具名格式为 `mcp__<server>__<tool>`。`env:变量名` 引用环境变量，避免密钥入文件。
+Once started, MCP tools are registered automatically with names of the form `mcp__<server>__<tool>`. `env:VAR` references environment variables so keys never enter the config file.
 
-### 使用 Skill
+### Using skills
 
-每个 skill 是一个目录，包含 `SKILL.md`：
+Each skill is a directory containing `SKILL.md`:
 
 ```
 .shenlan/skills/
 ├── my-skill/
-│   └── SKILL.md          # skill 定义（必需）
+│   └── SKILL.md          # skill definition (required)
 └── another-skill/
     ├── SKILL.md
-    └── references/        # 参考文件（可选）
+    └── references/        # reference files (optional)
 ```
 
-**SKILL.md 格式：**
+**SKILL.md format:**
 
 ```markdown
 ---
 name: my-skill
-description: 一句话描述，AI 据此决定何时触发
+description: One-line summary the AI uses to decide when to trigger
 ---
 
 # My Skill
 
-具体的指令内容，告诉 AI 如何使用这个 skill
+Specific instructions telling the AI how to use this skill
 ```
 
-**触发方式：**
-- 显式：输入 `$my-skill` 强制调用
-- 自动：AI 根据 description 匹配合适时自动加载
+**Triggering:**
+- Explicit: type `$my-skill` to force invocation
+- Automatic: the AI loads it when the description matches the task
 
-**存放位置：**
+**Locations:**
 
-| 位置 | 范围 |
+| Location | Scope |
 |------|------|
-| `.shenlan/skills/` | 当前项目，跟仓库走 |
-| `~/.config/shenlan/skills/` | 本机所有项目 |
+| `.shenlan/skills/` | Current project, follows the repository |
+| `~/.config/shenlan/skills/` | All projects on this machine |
 
-shenlan 内置了 `$create-skill` skill，可直接让 AI 帮你创建新 skill。
+shenlan ships with a built-in `$create-skill` skill — let the AI create new skills for you.
 
-首次运行会自动创建全局 `~/.shenlan/` 与项目 `.shenlan/` 目录：`config.json`（实际生效）+ `config.sample.json`（完整样例）+ `README.md`（字段说明）+ `env.example`（.env 样例）。项目配置优先级高于全局配置。
+On first run the global `~/.shenlan/` and project `.shenlan/` directories are created automatically: `config.json` (effective) + `config.sample.json` (full sample) + `README.md` (field descriptions) + `env.example` (`.env` sample). Project config takes precedence over global config.
 
-## 项目结构
+## Project structure
 
 ```
 shenlan/
-├── packages/core/   # @shenlan/core — 内核（LLM 调用、工具系统、会话存储、配置、MCP/Skill/权限，零 UI 依赖，可独立单测）
-├── packages/cli/    # @shenlan/cli — 终端（Ink 7 TUI、Agent 循环、slash 命令、内置 skills）
+├── packages/core/   # @shenlan/core — kernel: LLM calls, tool system, session storage, config, MCP/skills/permissions; zero UI dependencies, independently unit-testable
+├── packages/cli/    # @shenlan/cli — terminal: Ink 7 TUI, agent loop, slash commands, built-in skills
 ├── tsconfig.base.json
 └── package.json     # npm workspaces
 ```
 
-**依赖方向**: `cli` → `core`，core 零 UI 依赖。
+**Dependency direction**: `cli` → `core`; core has zero UI dependencies.
 
-## 技术栈
+## Tech stack
 
-- **语言**: TypeScript (strict mode, ES2022 + NodeNext)
-- **运行时**: Node.js 22+
-- **包管理**: npm workspaces (monorepo)
-- **终端**: Ink 7.1（React 19）TUI，有界动态区 + 原生滚动回滚区
-- **LLM**: 原生 fetch 调用 OpenAI 兼容 API（DeepSeek / Qwen / OpenAI / 任意 OpenAI 兼容网关）
-- **存储**: JSONL 文件存储会话
+- **Language**: TypeScript (strict mode, ES2022 + NodeNext)
+- **Runtime**: Node.js 22+
+- **Package management**: npm workspaces (monorepo)
+- **Terminal**: Ink 7.1 (React 19) TUI with a bounded dynamic region and native terminal scrollback
+- **LLM**: native fetch against OpenAI-compatible APIs (DeepSeek / Qwen / OpenAI / any OpenAI-compatible gateway)
+- **Storage**: JSONL files for sessions
 
-## 支持的模型
+## Supported models
 
 <!-- model-table:start -->
-| 模型 | 定位 | 上下文 |
+| Model | Tier | Context |
 |------|------|--------|
-| `deepseek-v4-flash` | 快速/经济 | 1M tokens |
-| `deepseek-v4-pro` | 强推理 | 1M tokens |
-| `deepseek-v4-pro-0813` | 强推理 | 1M tokens |
-| `qwen-turbo` | 快速/经济 | 1M tokens |
-| `qwen-plus` | 均衡 | 128K tokens |
-| `qwen-max` | 最强推理 | 128K tokens |
-| `qwen3.7-flash` | 快速/经济 | 1M tokens |
-| `qwen3.7-plus` | 均衡 | 128K tokens |
-| `qwen3.7-max` | 最强推理 | 128K tokens |
-| `qwen3.8-max` | 最强推理 | 128K tokens |
-| `qwen3.8-2.4t-a95b` | 最强推理 | 128K tokens |
-| `qwen-vl-max` | 最强（视觉） | 131K tokens |
-| `gpt-5.4` | 强推理（视觉） | 400K tokens |
-| `gpt-5.4-mini` | 快速/经济 | 400K tokens |
+| `deepseek-v4-flash` | Fast/economical | 1M tokens |
+| `deepseek-v4-pro` | Strong reasoning | 1M tokens |
+| `deepseek-v4-pro-0813` | Strong reasoning | 1M tokens |
+| `qwen-turbo` | Fast/economical | 1M tokens |
+| `qwen-plus` | Balanced | 128K tokens |
+| `qwen-max` | Strongest reasoning | 128K tokens |
+| `qwen3.7-flash` | Fast/economical | 1M tokens |
+| `qwen3.7-plus` | Balanced | 128K tokens |
+| `qwen3.7-max` | Strongest reasoning | 128K tokens |
+| `qwen3.8-max` | Strongest reasoning | 128K tokens |
+| `qwen3.8-2.4t-a95b` | Strongest reasoning | 128K tokens |
+| `qwen-vl-max` | Strongest (vision) | 131K tokens |
+| `gpt-5.4` | Strong reasoning (vision) | 400K tokens |
+| `gpt-5.4-mini` | Fast/economical | 400K tokens |
 <!-- model-table:end -->
 
-路由默认 cost-first：按生效价格（手动 > 自动同步 > 内置）动态选型，普通任务选最便宜，编码 / 推理 / 长上下文自动切最强；`/model auto|cost-first|quality-first|<模型名>` 可切换并持久化（重启恢复）。模型表由 `npm run docs:models` 从代码目录（MODEL_CATALOG）自动生成。
+Routing defaults to cost-first: models are picked dynamically by effective price (manual > auto-synced > built-in) — the cheapest for routine tasks, and the strongest for coding, reasoning, and long contexts. `/model auto|cost-first|quality-first|<model name>` switches and persists the policy (restored on restart). The model table is generated from the code catalog (`MODEL_CATALOG`) via `npm run docs:models`.
 
-### 接入任意 OpenAI 兼容模型（第三方网关 / Anthropic / Gemini / xAI / Mistral …）
+### Bring any OpenAI-compatible model (third-party gateways / Anthropic / Gemini / xAI / Mistral …)
 
-shenlan 全链路走 OpenAI 兼容协议，任何提供兼容端点的模型都能接：
+shenlan speaks the OpenAI-compatible protocol end to end, so any compatible endpoint works:
 
-1. 运行 `shenlan --setup`，选择 `4 Custom OpenAI-compatible`（或 `/keys` 里选中 Custom 行按 Enter），三步录入：
-   - **Base URL**：兼容端点根路径（如 `https://openrouter.ai/api`；留空 = 按模型名自动推导官方端点）
-   - **API Key**：留空取消
-   - **模型名**：自由文本（如 `gpt-5.4`、`claude-sonnet-4-5`、`deepseek-v4-pro-0813`、`llama-3.1-70b`），按前缀自动归属 provider（`gpt-*` → openai、`deepseek-v4-pro-0813` → 百炼等）
-2. 或直接改配置文件：`providerKeys` 写 key、`providerBaseUrls` 写端点（带 `/v1` 后缀会自动归一化，避免双重拼接）。
-3. 目录外模型 + 有效 key 会被直接采用为默认模型（不参与自动路由）；目录内模型（上表）按 cost-first 自动路由。
+1. Run `shenlan --setup` and choose `4 Custom OpenAI-compatible` (or select the Custom row in `/keys` and press Enter), then enter three fields:
+   - **Base URL**: the compatible endpoint root (e.g. `https://openrouter.ai/api`; leave empty to auto-derive the official endpoint from the model name)
+   - **API Key**: leave empty to cancel
+   - **Model name**: free text (e.g. `gpt-5.4`, `claude-sonnet-4-5`, `deepseek-v4-pro-0813`, `llama-3.1-70b`); the provider is derived from the prefix (`gpt-*` → openai, `deepseek-v4-pro-0813` → bailian, etc.)
+2. Or edit the config directly: `providerKeys` for keys, `providerBaseUrls` for endpoints (trailing `/v1` is normalized automatically).
+3. Off-catalog models with a valid key are adopted as the default model (they don't join auto-routing); catalog models (table above) route cost-first automatically.
 
-**只配 key 就能用的 provider（端点内置，无需 Base URL）**：deepseek、qwen、百炼（bailian）、openai，以及豆包 / 智谱 / Kimi：
+**Providers that work with a key alone (endpoints built in, no Base URL needed)**: deepseek, qwen, bailian, openai, plus doubao / zhipu / kimi:
 
-| 模型名前缀 | provider | 环境变量 | 内置端点 |
+| Model prefix | Provider | Environment variable | Built-in endpoint |
 |---|---|---|---|
-| `doubao-*` / `skylark-*` | doubao | `DOUBAO_API_KEY` | 火山方舟 `ark.cn-beijing.volces.com/api/v3` |
-| `glm-*` | zhipu | `ZHIPU_API_KEY` | 智谱 `open.bigmodel.cn/api/paas/v4` |
-| `moonshot-*` | kimi | `KIMI_API_KEY` | Moonshot 国内站 `api.moonshot.cn` |
+| `doubao-*` / `skylark-*` | doubao | `DOUBAO_API_KEY` | Volcano Ark `ark.cn-beijing.volces.com/api/v3` |
+| `glm-*` | zhipu | `ZHIPU_API_KEY` | `open.bigmodel.cn/api/paas/v4` |
+| `moonshot-*` | kimi | `KIMI_API_KEY` | Moonshot CN `api.moonshot.cn` |
 
-这三家不进模型目录（价格/窗口未核实），走「目录外模型 + 有效 key 直接采用」路径，成本按同档回退估算记账。海外账号 key 与国内不互通，需覆盖端点：`providerBaseUrls` 写 `{"kimi": "https://api.moonshot.ai"}`。
+These three are not in the catalog (prices/windows not verified) and follow the "off-catalog model + valid key" path, with costs accounted via same-tier fallback estimates. Overseas account keys are not interchangeable with CN ones — override the endpoint via `providerBaseUrls`, e.g. `{"kimi": "https://api.moonshot.ai"}`.
 
-示例（Claude 经 Anthropic 官方 OpenAI 兼容端点、百炼托管快照）：
+Example (Claude via Anthropic's official OpenAI-compatible endpoint, bailian-hosted snapshot):
 
 ```json
 {
-  "providerKeys": { "claude": "sk-ant-xxx", "bailian": "sk-百炼key" },
+  "providerKeys": { "claude": "sk-ant-xxx", "bailian": "sk-bailian-key" },
   "providerBaseUrls": { "claude": "https://api.anthropic.com" }
 }
 ```
 
-环境变量等价写法：`export ANTHROPIC_BASE_URL=...`、`export BAILIAN_API_KEY=sk-xxx`（通用规则 `<PROVIDER>_API_KEY`，openai 兼容 `OPENAI_API_KEY` 与历史 `GPT_API_KEY`）。
+Equivalent environment variables: `export ANTHROPIC_BASE_URL=...`, `export BAILIAN_API_KEY=sk-xxx` (general rule `<PROVIDER>_API_KEY`; openai accepts `OPENAI_API_KEY` and the legacy `GPT_API_KEY`).
 
-## 配置
+## Configuration
 
-配置优先级（高到低）：真实环境变量 > 项目 `.env` > 全局 `~/.shenlan/.env` > 项目 `.shenlan/config.json` > 全局 `~/.shenlan/config.json`
+Precedence (high to low): real environment variables > project `.env` > global `~/.shenlan/.env` > project `.shenlan/config.json` > global `~/.shenlan/config.json`
 
-首次运行自动生成 `~/.shenlan/` 与项目 `.shenlan/` 目录：`config.json`（实际生效）+ `config.sample.json`（完整字段样例）+ `README.md`（字段说明）+ `env.example`（.env 样例）。样例文件缺失时会在下次启动自动补写，已存在的文件不会被覆盖。
+On first run the `~/.shenlan/` and project `.shenlan/` directories are generated: `config.json` (effective) + `config.sample.json` (full field samples) + `README.md` (field descriptions) + `env.example` (`.env` sample). Missing samples are rewritten on the next launch; existing files are never overwritten.
 
-### 环境变量
+### Environment variables
 
-| 变量 | 说明 |
+| Variable | Description |
 |------|------|
-| `DEEPSEEK_API_KEY` / `QWEN_API_KEY` / `OPENAI_API_KEY` / `BAILIAN_API_KEY` | 各 provider 的 API Key（通用规则 `<PROVIDER>_API_KEY`；也可写入配置 `providerKeys`，环境变量优先；`OPENAI_API_KEY` 兼容历史 `GPT_API_KEY`） |
-| `SHENLAN_API_KEY` | 通用 fallback Key |
-| `SHENLAN_BASE_URL` | API 端点覆盖（默认按模型 provider 自动解析：deepseek → `api.deepseek.com`，qwen → dashscope compatible-mode） |
-| `SHENLAN_MODEL` | 模型名覆盖 |
-| `TAVILY_API_KEY` | Tavily 搜索 Key（无原生搜索的模型联网搜索 fallback） |
+| `DEEPSEEK_API_KEY` / `QWEN_API_KEY` / `OPENAI_API_KEY` / `BAILIAN_API_KEY` | API keys per provider (general rule `<PROVIDER>_API_KEY`; can also be written to `providerKeys` in config; environment variables win; `OPENAI_API_KEY` is compatible with the legacy `GPT_API_KEY`) |
+| `SHENLAN_API_KEY` | Generic fallback key |
+| `SHENLAN_BASE_URL` | API endpoint override (by default auto-derived per model provider: deepseek → `api.deepseek.com`, qwen → dashscope compatible-mode) |
+| `SHENLAN_MODEL` | Model name override |
+| `TAVILY_API_KEY` | Tavily search key (fallback for models without native web search) |
 
-### .env 文件
+### `.env` files
 
-- 位置：项目 `cwd/.env`（优先）或全局 `~/.shenlan/.env`（兜底）。
-- 格式：每行 `KEY=VALUE`，支持 `#` 注释、`export ` 前缀与引号；真实环境变量（shell export）优先于 `.env`。
-- 样例：`.shenlan/env.example`（新目录首跑自动生成）。
+- Location: project `cwd/.env` (preferred) or global `~/.shenlan/.env` (fallback).
+- Format: `KEY=VALUE` per line, with `#` comments, `export ` prefix, and quoting supported; real environment variables (shell export) take precedence over `.env`.
+- Sample: `.shenlan/env.example` (auto-generated on first run in a new directory).
 
 ```bash
-# 项目根目录 .env
+# Project root .env
 DEEPSEEK_API_KEY=sk-xxx
 QWEN_API_KEY=sk-xxx
 ```
 
-### 配置文件
+### Config files
 
-配置写在 `~/.shenlan/config.json`（全局）或 `.shenlan/config.json`（项目），示例：
+Config lives in `~/.shenlan/config.json` (global) or `.shenlan/config.json` (project), for example:
 
 ```json
 {
@@ -320,104 +320,104 @@ QWEN_API_KEY=sk-xxx
 }
 ```
 
-`model.baseUrl` 留空时按模型 provider 自动解析端点；API Key 优先级：环境变量 `<PROVIDER>_API_KEY` > `providerKeys` > `model.apiKey`。`--setup` 向导可同时配置 DeepSeek / qwen（key 写入 `providerKeys`，选择默认模型并逐个连通性测试）。
+With `model.baseUrl` empty, the endpoint is auto-derived per model provider. API key precedence: environment variable `<PROVIDER>_API_KEY` > `providerKeys` > `model.apiKey`. The `--setup` wizard can configure DeepSeek and/or qwen at once (keys written to `providerKeys`, default model selection, per-provider connectivity tests).
 
-完整字段样例见 `~/.shenlan/config.sample.json`（全局）与 `.shenlan/config.sample.json`（项目），字段说明见各目录下的 `README.md`。密钥相关文件权限为 0600、全局目录 0700，仅本用户可读。
+Full field samples: `~/.shenlan/config.sample.json` (global) and `.shenlan/config.sample.json` (project); field descriptions live in each directory's `README.md`. Key-related files are created with 0600 permissions and the global directory with 0700 — readable only by the current user.
 
-### 权限模式
+### Permission modes
 
-| 模式 | 读操作 | 写操作 | Shell |
+| Mode | Reads | Writes | Shell |
 |------|--------|--------|-------|
-| `default` | 自动放行 | 需确认 | 需确认 |
-| `acceptEdits` | 自动放行 | 自动放行 | 需确认 |
-| `bypassPermissions` | 自动放行 | 自动放行 | 自动放行 |
-| `plan` | 只读规划态 | 一律拒绝 | 一律拒绝 |
+| `default` | allowed | confirm | confirm |
+| `acceptEdits` | allowed | allowed | confirm |
+| `bypassPermissions` | allowed | allowed | allowed |
+| `plan` | read-only planning | denied | denied |
 
-> plan 态优先级最高：write / edit / shell 一律拒绝（即使此前处于 bypass），其余工具放行。
+> Plan mode has the highest priority: write/edit/shell are always denied (even after bypass); other tools are allowed.
 
-## 内置工具
+## Built-in tools
 
-| 工具 | 说明 |
+| Tool | Description |
 |------|------|
-| `read` | 读取文件，支持行范围 |
-| `write` | 写入文件（自动快照，可 /undo） |
-| `edit` | 精确字符串替换编辑（自动快照） |
-| `shell` | Shell 命令执行（高危命令拦截；超时转后台不杀进程） |
-| `shell_status` / `shell_kill` | 查看后台 shell 命令状态 / 终止（shell 超时后产生） |
-| `search` | 正则内容搜索（ripgrep） |
-| `glob` | 文件名模式匹配（支持 ** 递归） |
-| `web_search` | 联网搜索（DeepSeek / qwen 原生，其他模型走 Tavily；原生失败不降级） |
-| `web_fetch` | 抓取网页内容 |
-| `pitfall_search` | 按 trigger / symptom 检索坑记录 |
-| `ref_outline` / `ref_retrieve` | 查看外置引用目录 / 取回全文 |
-| `restore` | 从回收站恢复文件（配合 /trash） |
-| `todo_write` / `update_plan` | 任务待办与执行计划（动态区最小 UI） |
-| `agent` | 派生子 agent 独立执行子任务（主循环内串行，/agents 并行编排） |
-| `memory_save` | 保存跨会话记忆（/memory 查看；memory.autoSave=false 时不可见） |
-| MCP 动态工具 | 按配置挂载 server 自动注册 |
+| `read` | Read files, with line ranges |
+| `write` | Write files (automatic snapshots, undoable via /undo) |
+| `edit` | Precise string-replacement editing (automatic snapshots) |
+| `shell` | Run shell commands (high-risk interception; timeouts move to background instead of killing) |
+| `shell_status` / `shell_kill` | Inspect / terminate background shell commands (created after shell timeouts) |
+| `search` | Regex content search (ripgrep) |
+| `glob` | Filename pattern matching (supports `**` recursion) |
+| `web_search` | Web search (native for DeepSeek / qwen, Tavily for other models; native failures don't silently downgrade) |
+| `web_fetch` | Fetch web page content |
+| `pitfall_search` | Search pitfall records by trigger / symptom |
+| `ref_outline` / `ref_retrieve` | View external reference directories / retrieve full text |
+| `restore` | Restore files from the trash (with /trash) |
+| `todo_write` / `update_plan` | Task todos and execution plans (minimal dynamic-region UI) |
+| `agent` | Spawn sub-agents to execute subtasks (serial in the main loop; `/agents` for parallel orchestration) |
+| `memory_save` | Save cross-session memories (`/memory` to view; hidden from the model when `memory.autoSave=false`) |
+| MCP dynamic tools | Auto-registered from configured MCP servers |
 
-## Slash 命令
+## Slash commands
 
-| 命令 | 说明 |
+| Command | Description |
 |------|------|
-| `/help` `/h` | 显示帮助 |
-| `/model [name]` | 查看或切换模型 |
-| `/keys` | 配置 / 查看 API Key（掩码显示，全局/项目级，支持粘贴） |
-| `/security` | 提交时安全检查（pre-commit 钩子状态 / 安装卸载 / 手动扫描） |
-| `/goal [目标]` | 长任务目标模式（`/goal <可验证目标>`，`pause`/`resume`/`clear`） |
-| `/mcp` | 管理 MCP servers |
-| `/skills` | 列出已安装 skills |
-| `/memory` | 查看本地记忆 |
-| `/permissions` | 查看权限模式 |
-| `/sessions` | 列出会话 |
-| `/plan [save]` | 进入 Plan Mode（/plan off 退出需确认，/plan save [标题] 落盘计划） |
-| `/agents` `/a` | 子代理分解执行任务 |
-| `/cost` | 查看本会话成本 |
-| `/budget` | 成本护栏状态（进度 / 豁免 / goal） |
-| `/prices` | 查看价格表（/prices check 手动触发官方同步） |
-| `/context` | 上下文构成与压缩阈值 |
-| `/compact` | 手动压缩上下文 |
-| `/undo` | 撤销上次 write/edit |
-| `/pitfall` | 查看项目坑记录 |
-| `/trash` | 回收站管理 |
-| `/temp` `/audit` | 查看快照数量 / 会话与模型审计 |
-| `/cleanup` | 清理快照文件 |
-| `/clear` | 清空会话（不清屏、保留滚动区，确认提示紧贴输入框） |
-| `/stop` | 停止当前任务 |
-| `/quit` `/exit` `/q` | 退出 |
+| `/help` `/h` | Show help |
+| `/model [name]` | View or switch models |
+| `/keys` | Configure / view API keys (masked, global/project, paste support) |
+| `/security` | Commit-time security check (pre-commit hook status / install / uninstall / manual scan) |
+| `/goal [goal]` | Long-task goal mode (`/goal <verifiable goal>`, `pause`/`resume`/`clear`) |
+| `/mcp` | Manage MCP servers |
+| `/skills` | List installed skills |
+| `/memory` | View local memories |
+| `/permissions` | View permission modes |
+| `/sessions` | List sessions |
+| `/plan [save]` | Enter plan mode (`/plan off` exits with confirmation; `/plan save [title]` persists the plan) |
+| `/agents` `/a` | Decompose tasks into sub-agents |
+| `/cost` | View current session cost |
+| `/budget` | Cost guardrail status (progress / waive / goal) |
+| `/prices` | View the price table (`/prices check` triggers an official sync) |
+| `/context` | Context composition and compaction threshold |
+| `/compact` | Compact context manually |
+| `/undo` | Undo the last write/edit |
+| `/pitfall` | View project pitfall records |
+| `/trash` | Trash management |
+| `/temp` `/audit` | View snapshot count / session and model audit |
+| `/cleanup` | Clean up snapshot files |
+| `/clear` | Clear the session (no screen clearing, scrollback preserved, confirmation hint right above the input) |
+| `/stop` | Stop the current task |
+| `/quit` `/exit` `/q` | Quit |
 
-## 会话存储
+## Session storage
 
-会话以 JSONL 格式存储在 `~/.local/share/shenlan/sessions/` 目录下（macOS/Linux；Windows 为 `%LOCALAPPDATA%\shenlan\sessions`），每行一个消息事件。
+Sessions are stored as JSONL files in `~/.local/share/shenlan/sessions/` (macOS/Linux; Windows: `%LOCALAPPDATA%\shenlan\sessions`), one message event per line.
 
-## 开发
+## Development
 
 ```bash
-# 编译
+# Compile
 npm run build
 
-# 运行全部单测（vitest）
+# Run all unit tests (vitest)
 npm test
 
-# 监听编译
+# Watch-mode incremental compile
 npm run dev
 
-# PTY 端到端测试（macOS/Linux，需 python3，见 packages/cli/e2e/README.md）
+# PTY end-to-end tests (macOS/Linux, requires python3, see packages/cli/e2e/README.md)
 npm run test:e2e
 
-# 清理编译产物
+# Clean build artifacts
 npm run clean
 ```
 
-## 设计原则
+## Design principles
 
-- **内核零 UI 依赖**: 所有决策逻辑在 core，CLI 只做渲染与输入
-- **可测试性优先**: 每个模块独立，可单测
-- **配置驱动**: 模型名、权限规则、skill 目录全部可配置
+- **Zero UI dependencies in the kernel**: all decision logic lives in core; the CLI only renders and reads input
+- **Testability first**: every module is independent and unit-testable
+- **Configuration-driven**: model names, permission rules, and skill directories are all configurable
 
-## 版本
+## Version
 
-当前 **v0.4.90**（以 [CHANGELOG.md](./CHANGELOG.md) 为准）
+Current version: **v0.4.90** — version history per [CHANGELOG.md](./CHANGELOG.md)
 
 ## License
 

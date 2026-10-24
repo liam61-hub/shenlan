@@ -30,9 +30,9 @@ describe('README 模型表漂移守卫', () => {
     const cliPackage = JSON.parse(
       readFileSync(join(repoRoot, 'packages', 'cli', 'package.json'), 'utf-8'),
     ) as { version: string };
-    const match = readme.match(/当前 \*\*v([^*]+)\*\*/);
+    const match = readme.match(/Current version:\s*\*\*v([^*]+)\*\*/);
 
-    expect(match, 'README 缺少“当前 **vX.Y.Z**”版本标记').toBeTruthy();
+    expect(match, 'README 缺少 "Current version: **vX.Y.Z**" 版本标记').toBeTruthy();
     expect(match![1]).toBe(VERSION);
     expect(cliPackage.version).toBe(VERSION);
   });

@@ -7,16 +7,16 @@ import { MODEL_CATALOG } from '../packages/core/dist/index.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const tag = (c) => {
-  const base = c.tier >= 4 ? (c.thinking ? '最强推理' : '最强')
-    : c.tier === 3 ? '强推理'
-    : c.tier === 2 ? '均衡'
-    : '快速/经济';
-  return c.modalities.includes('image') ? `${base}（视觉）` : base;
+  const base = c.tier >= 4 ? (c.thinking ? 'Strongest reasoning' : 'Strongest')
+    : c.tier === 3 ? 'Strong reasoning'
+    : c.tier === 2 ? 'Balanced'
+    : 'Fast/economical';
+  return c.modalities.includes('image') ? `${base} (vision)` : base;
 };
 const fmtCtx = (n) => (n >= 1_000_000 ? `${n / 1_000_000}M tokens` : `${Math.round(n / 1000)}K tokens`);
 
 const rows = MODEL_CATALOG.map((c) => `| \`${c.model}\` | ${tag(c)} | ${fmtCtx(c.contextWindow)} |`);
-const block = ['| 模型 | 定位 | 上下文 |', '|------|------|--------|', ...rows].join('\n');
+const block = ['| Model | Tier | Context |', '|------|------|--------|', ...rows].join('\n');
 
 const readmePath = 'README.md';
 const text = readFileSync(readmePath, 'utf-8');
