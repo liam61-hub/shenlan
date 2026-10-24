@@ -46,10 +46,8 @@ E2E 细节（驱动清单、端口、scratch 目录覆盖）见 [packages/cli/e2
 ```
 README.md           → 项目门面（人读）：安装、快速开始、功能一览
 SHENLAN.md          → 本文件：人向项目说明（概要、结构、技术栈、命令）
-AGENTS.md           → Agent 共享规范唯一事实源（Codex 自动加载，Claude 经 @AGENTS.md 导入）
-CLAUDE.md           → Claude Code 入口薄壳：@导入 AGENTS.md + Claude 特有约定
 CONTRIBUTING.md     → 贡献流程
 SECURITY.md         → 私下报告安全漏洞的方式
 ```
 
-Agent 参与开发时，详细规范（架构约束、代码规范、提交与 PR 规范等）以 [AGENTS.md](./AGENTS.md) 为准。
+参与开发时，请先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
