@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.js.map
+*.d.ts.map
+# 整个 .shenlan/ 不入仓：配置/会话/审计/调试日志/引用缓存/脚本均为本机运行时产物
+.shenlan/
+__pycache__/
+*.log
+.DS_Store
+Thumbs.db
+
+.claude/
+*.tsbuildinfo
+.npmrc
+
+.codegraph/
+docs/site/.vitepress/cache/
+
+# 个人本地规则（C3：SHENLAN.local.md 绝不提交）
+SHENLAN.local.md

@@ -1,0 +1,29 @@
+{
+  "name": "shenlan",
+  "version": "0.3.6",
+  "private": true,
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/liam61-hub/shenlan.git" },
+  "description": "深蓝（shenlan）—— 自建 Agent Harness CLI",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/core packages/cli",
+    "test": "vitest run",
+    "test:e2e": "npm run build && python3 packages/cli/e2e/run_e2e.py",
+    "docs:models": "npm run build && node docs/gen-model-table.mjs",
+    "docs:site:dev": "vitepress docs/site",
+    "docs:site:build": "vitepress build docs/site",
+    "docs:site:preview": "vitepress preview docs/site",
+    "release:audit": "node scripts/release-audit.mjs",
+    "dev": "tsc -b packages/core packages/cli --watch",
+    "clean": "rm -rf packages/*/dist node_modules"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

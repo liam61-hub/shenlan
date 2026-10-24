@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    # 只跑代码相关改动，文档/日志类提交不消耗 Actions 分钟
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'README.md'
+      - 'docs/site/**'
+      - 'scripts/release-audit.mjs'
+      - '.github/**'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'README.md'
+      - 'docs/site/**'
+      - 'scripts/release-audit.mjs'
+      - '.github/**'
+
+# 连续 push 只保留最新一次，取消在跑的旧任务，避免浪费分钟
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # macOS 由本地开发覆盖（开发机即 macOS），CI 保留 Ubuntu + Windows（目标平台优先）
+        os: [ubuntu-latest, windows-latest]
+        node-version: [22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      # 站点构建与 OS 无关，只在 Ubuntu 跑（Windows 分钟数按 2× 计费）
+      - run: npm run docs:site:build
+        if: runner.os == 'Linux'
+      # 打包审计需双平台：tarball 文件列表与路径分隔符正是可能跨平台不同的东西
+      - run: npm run release:audit

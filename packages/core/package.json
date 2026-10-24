@@ -1,0 +1,31 @@
+{
+  "name": "@shenlan/core",
+  "version": "0.3.33",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/liam61-hub/shenlan.git", "directory": "packages/core" },
+  "bugs": { "url": "https://github.com/liam61-hub/shenlan/issues" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^3.1.1",
+    "@types/node": "^22.0.0"
+  }
+}
