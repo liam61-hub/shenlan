@@ -1,6 +1,6 @@
 {
   "name": "shenlan",
-  "version": "0.3.6",
+  "version": "0.4.90",
   "private": true,
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/liam61-hub/shenlan.git" },

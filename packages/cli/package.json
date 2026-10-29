@@ -2,6 +2,9 @@
   "name": "@shenlan/cli",
   "version": "0.4.90",
   "license": "MIT",
+  "description": "OpenAI-compatible terminal agent CLI powered by shenlan core.",
+  "homepage": "https://github.com/liam61-hub/shenlan#readme",
+  "keywords": ["agent", "cli", "llm", "terminal", "shenlan"],
   "repository": { "type": "git", "url": "git+https://github.com/liam61-hub/shenlan.git", "directory": "packages/cli" },
   "bugs": { "url": "https://github.com/liam61-hub/shenlan/issues" },
   "type": "module",
@@ -23,7 +26,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@shenlan/core": "0.3.33",
+    "@shenlan/core": "0.4.90",
     "chalk": "^5.4.1",
     "ink": "^7.1.0",
     "react": "^19.2.0",

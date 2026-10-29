@@ -1,7 +1,10 @@
 {
   "name": "@shenlan/core",
-  "version": "0.3.33",
+  "version": "0.4.90",
   "license": "MIT",
+  "description": "Shared runtime for the shenlan terminal agent.",
+  "homepage": "https://github.com/liam61-hub/shenlan#readme",
+  "keywords": ["agent", "llm", "shenlan"],
   "repository": { "type": "git", "url": "git+https://github.com/liam61-hub/shenlan.git", "directory": "packages/core" },
   "bugs": { "url": "https://github.com/liam61-hub/shenlan/issues" },
   "type": "module",
