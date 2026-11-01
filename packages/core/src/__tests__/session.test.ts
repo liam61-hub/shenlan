@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -7,6 +7,7 @@ import {
   createSession,
   appendToJsonl,
   flushSession,
+  flushAllSessions,
   syncSessionMessages,
   writeSessionMeta,
   loadSession,
@@ -22,6 +23,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -65,6 +67,18 @@ describe('appendToJsonl / flushSession / loadSession 往返', () => {
     expect(restored!.messages[24]).toEqual(msg('user', 'm24'));
   });
 
+  it('低流量会话在 10 秒定时器到期时刷盘', () => {
+    vi.useFakeTimers();
+    const session = createSession();
+    appendToJsonl(session, msg('user', 'low traffic message'));
+    expect(existsSync(join(dir, `${session.id}.jsonl`))).toBe(false);
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(loadSession(session.id)?.messages).toEqual([msg('user', 'low traffic message')]);
+    vi.useRealTimers();
+  });
+
   it('flushSession 幂等且清空缓冲', () => {
     const session = createSession();
     appendToJsonl(session, msg('user', 'a'));
@@ -77,6 +91,84 @@ describe('appendToJsonl / flushSession / loadSession 往返', () => {
       JSON.stringify(msg('user', 'a')),
       JSON.stringify(msg('assistant', 'b')),
     ]);
+  });
+
+  it('退出时刷完所有会话并取消低流量定时器', () => {
+    vi.useFakeTimers();
+    const first = createSession();
+    const second = createSession();
+    appendToJsonl(first, msg('user', 'first'));
+    appendToJsonl(second, msg('user', 'second'));
+    expect(vi.getTimerCount()).toBe(2);
+
+    flushAllSessions();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(loadSession(first.id)?.messages).toEqual([msg('user', 'first')]);
+    expect(loadSession(second.id)?.messages).toEqual([msg('user', 'second')]);
+    vi.advanceTimersByTime(10_000);
+    expect(fileContent(first.id).trim().split('\n')).toEqual([JSON.stringify(msg('user', 'first'))]);
+    expect(fileContent(second.id).trim().split('\n')).toEqual([JSON.stringify(msg('user', 'second'))]);
+  });
+
+  it('截断 JSONL 尾行时恢复有效前缀并保留损坏原文', () => {
+    const session = createSession();
+    const validPrefix = `${JSON.stringify(msg('user', '已完成问题'))}\n${JSON.stringify(msg('assistant', '已完成回答'))}\n`;
+    const damagedContent = `${validPrefix}{"role":"assistant","content":"truncated`;
+    writeFileSync(join(dir, `${session.id}.jsonl`), damagedContent, 'utf-8');
+
+    const restored = loadSession(session.id);
+
+    expect(restored?.messages).toEqual([
+      msg('user', '已完成问题'),
+      msg('assistant', '已完成回答'),
+    ]);
+    expect(restored?.recovery).toEqual({ kind: 'truncated-tail', line: 3 });
+    expect(fileContent(session.id)).toBe(damagedContent);
+  });
+
+  it('中间记录损坏时只恢复此前有效前缀并报告损坏行', () => {
+    const session = createSession();
+    const content = `${JSON.stringify(msg('user', 'valid'))}\nnot-json\n${JSON.stringify(msg('assistant', 'later'))}\n`;
+    writeFileSync(join(dir, `${session.id}.jsonl`), content, 'utf-8');
+
+    const restored = loadSession(session.id);
+
+    expect(restored?.messages).toEqual([msg('user', 'valid')]);
+    expect(restored?.recovery).toEqual({ kind: 'corrupt-record', line: 2 });
+    expect(fileContent(session.id)).toBe(content);
+  });
+
+  it('结构无效的 JSON 消息会停止恢复并保留此前有效前缀', () => {
+    const session = createSession();
+    const content = `${JSON.stringify(msg('user', 'valid'))}\n${JSON.stringify({ role: 'tool', content: 'missing tool_call_id' })}\n`;
+    writeFileSync(join(dir, `${session.id}.jsonl`), content, 'utf-8');
+
+    const restored = loadSession(session.id);
+
+    expect(restored?.messages).toEqual([msg('user', 'valid')]);
+    expect(restored?.recovery).toEqual({ kind: 'invalid-message', line: 2 });
+    expect(fileContent(session.id)).toBe(content);
+  });
+
+  it('不恢复缺少 tool 响应的 assistant/tool 调用片段', () => {
+    const session = createSession();
+    const call = {
+      id: 'call-1',
+      type: 'function' as const,
+      function: { name: 'read', arguments: '{"file_path":"a.txt"}' },
+    };
+    const before = msg('user', 'before');
+    const assistant: Message = { role: 'assistant', content: null, tool_calls: [call] };
+    const after = msg('user', 'after');
+    const content = [before, assistant, after].map((message) => JSON.stringify(message)).join('\n') + '\n';
+    writeFileSync(join(dir, `${session.id}.jsonl`), content, 'utf-8');
+
+    const restored = loadSession(session.id);
+
+    expect(restored?.messages).toEqual([before, after]);
+    expect(restored?.recovery).toEqual({ kind: 'incomplete-tool-pair', line: 2 });
+    expect(fileContent(session.id)).toBe(content);
   });
 });
 
@@ -132,11 +224,37 @@ describe('syncSessionMessages（全量同步）', () => {
 
     expect(loadSession(session.id)?.messages).toEqual(live);
   });
+
+  it('原子 checkpoint 替换完整文件并清除正常临时文件', () => {
+    const session = createSession();
+    syncSessionMessages(session.id, [msg('user', '旧快照')]);
+
+    syncSessionMessages(session.id, [msg('user', '新快照'), msg('assistant', '完成')]);
+
+    expect(loadSession(session.id)?.messages).toEqual([
+      msg('user', '新快照'),
+      msg('assistant', '完成'),
+    ]);
+    expect(readdirSync(dir).filter((name) => name.startsWith(`${session.id}.jsonl.tmp-`))).toEqual([]);
+  });
+
+  it('checkpoint 替换前中断时仍恢复旧 checkpoint，忽略残留临时文件', () => {
+    const session = createSession();
+    const completed = [msg('user', '已完成轮次'), msg('assistant', '已保存回答')];
+    syncSessionMessages(session.id, completed);
+    const original = fileContent(session.id);
+    writeFileSync(join(dir, `${session.id}.jsonl.tmp-interrupted`), '{"role":"user"', 'utf-8');
+
+    const restored = loadSession(session.id);
+
+    expect(restored?.messages).toEqual(completed);
+    expect(fileContent(session.id)).toBe(original);
+  });
 });
 
 describe('writeSessionMeta / listSessions', () => {
   it('writeSessionMeta 写入 id/title/messageCount', () => {
-    const session = createSession('测试会话');
+    const session = createSession('测试会话', 'D:/WORK/project-a');
     session.messages = [msg('user', 'hi')];
     writeSessionMeta(session, { updatedAt: '2026-08-13T00:00:00.000Z' });
 
@@ -146,7 +264,22 @@ describe('writeSessionMeta / listSessions', () => {
     expect(meta.id).toBe(session.id);
     expect(meta.title).toBe('测试会话');
     expect(meta.messageCount).toBe(1);
+    expect(meta.projectPath).toBe('D:/WORK/project-a');
     expect(meta.updatedAt).toBe('2026-08-13T00:00:00.000Z');
+  });
+
+  it('loadSession 和 listSessions 返回已校验的项目身份', () => {
+    const session = createSession(undefined, 'D:/WORK/project-a');
+    appendToJsonl(session, msg('user', 'project scoped'));
+    flushSession(session.id);
+    writeSessionMeta(session);
+
+    expect(loadSession(session.id)?.projectPath).toBe('D:/WORK/project-a');
+    expect(listSessions().find((listed) => listed.id === session.id)?.projectPath).toBe('D:/WORK/project-a');
+  });
+
+  it('无效 session ID 不会被当作文件路径读取', () => {
+    expect(loadSession('../outside')).toBeNull();
   });
 
   it('listSessions 只统计 jsonl 文件且带 messageCount', () => {

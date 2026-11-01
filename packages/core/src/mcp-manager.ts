@@ -121,14 +121,14 @@ async function connectServer(cfg: McpServerConfig): Promise<void> {
     for (const tool of tools) {
       registerMcpTool(tool.name, tool, client);
     }
-    if (process.env.SHENLAN_DEBUG) {
+    if (process.env.SHENLAN_DEBUG === '1') {
       process.stderr.write(`[mcp] "${cfg.name}": ${tools.length} tools registered\n`);
     }
   } catch (err) {
     try { client.close(); } catch { /* ignore */ }
     statuses.set(cfg.name, { error: (err as Error).message });
-    if (process.env.SHENLAN_DEBUG) {
-      process.stderr.write(`[mcp] "${cfg.name}" failed: ${(err as Error).message}\n`);
+    if (process.env.SHENLAN_DEBUG === '1') {
+      process.stderr.write(`[mcp] "${cfg.name}" failed (${err instanceof Error ? err.name : typeof err})\n`);
     }
   }
 }

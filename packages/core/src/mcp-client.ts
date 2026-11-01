@@ -123,8 +123,8 @@ class StdioTransport implements McpTransport {
     // Log stderr
     this.proc.stderr?.on('data', (data: Buffer) => {
       // MCP servers may log to stderr — silently ignore in production
-      if (process.env.SHENLAN_DEBUG) {
-        process.stderr.write(`[mcp:stderr] ${data.toString().slice(0, 200)}\n`);
+      if (process.env.SHENLAN_DEBUG === '1') {
+        process.stderr.write(`[mcp:stderr] ${data.byteLength} bytes received\n`);
       }
     });
 
@@ -231,7 +231,7 @@ export class McpClient {
     }) as { serverInfo?: { name: string }; capabilities?: unknown };
     this._connected = true;
     this._capabilities = Object.keys((result.capabilities as Record<string, unknown>) || {});
-    if (process.env.SHENLAN_DEBUG) {
+    if (process.env.SHENLAN_DEBUG === '1') {
       process.stderr.write(`[mcp] Connected to "${this.config.name}" (${result.serverInfo?.name || 'unknown'})\n`);
     }
   }

@@ -14,7 +14,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
     ...actual,
     chatStream: vi.fn(),
     chat: vi.fn().mockRejectedValue(new Error('mock: no network')),
-    executeToolWithTimeout: vi.fn(async () => ({ content: 'executed ok', isError: false })),
+    executeToolCall: vi.fn(async () => ({ status: 'executed', content: 'executed ok', isError: false })),
     getAvailableTools: vi.fn(() => []),
     getTool: vi.fn(() => ({
       name: 'shell',
@@ -25,7 +25,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
   };
 });
 
-import { chatStream, executeToolWithTimeout } from '@shenlan/core';
+import { chatStream, executeToolCall } from '@shenlan/core';
 import { runAgentLoop, resetStop } from '../repl.js';
 import type { AgentCallbacks } from '../repl.js';
 import { setMode } from '../mode.js';
@@ -115,7 +115,7 @@ describe('坑记忆反馈闭环（repl 流程）', () => {
 
     const raw = readFileSync(pf, 'utf-8');
     expect(raw).toContain('hits: 1');
-    expect(vi.mocked(executeToolWithTimeout)).not.toHaveBeenCalled();
+    expect(vi.mocked(executeToolCall)).not.toHaveBeenCalled();
     expect(events.map(e => e.kind)).toContain('complete');
   });
 
@@ -123,7 +123,7 @@ describe('坑记忆反馈闭环（repl 流程）', () => {
     const pf = writePitfalls(
       '# npm 私服偶发 401\nseverity: soft\nhits: 1\ntrigger: npm install, 401\n正文',
     );
-    vi.mocked(executeToolWithTimeout).mockResolvedValue({ timedOut: false,
+    vi.mocked(executeToolCall).mockResolvedValue({ status: 'failed',
       content: 'npm install 失败：401 Unauthorized from registry',
       isError: true,
     });
@@ -140,7 +140,7 @@ describe('坑记忆反馈闭环（repl 流程）', () => {
     const pf = writePitfalls(
       '# npm 私服偶发 401\nseverity: soft\nhits: 1\ntrigger: npm install\n正文',
     );
-    vi.mocked(executeToolWithTimeout).mockResolvedValue({ timedOut: false,
+    vi.mocked(executeToolCall).mockResolvedValue({ status: 'failed',
       content: 'npm install 失败：401',
       isError: true,
     });
@@ -158,7 +158,7 @@ describe('坑记忆反馈闭环（repl 流程）', () => {
     const pf = writePitfalls(
       '# 老坑\nseverity: soft\nhits: 2\ntrigger: npm install\n正文',
     );
-    vi.mocked(executeToolWithTimeout).mockResolvedValue({ timedOut: false,
+    vi.mocked(executeToolCall).mockResolvedValue({ status: 'failed',
       content: 'npm install 失败：网络错误',
       isError: true,
     });
@@ -182,6 +182,6 @@ describe('坑记忆反馈闭环（repl 流程）', () => {
     await runAgentLoop('', baseConfig, [{ role: 'user', content: '发布' }], callbacks);
 
     expect(readFileSync(pf, 'utf-8')).toContain('hits: 1');
-    expect(vi.mocked(executeToolWithTimeout)).not.toHaveBeenCalled();
+    expect(vi.mocked(executeToolCall)).not.toHaveBeenCalled();
   });
 });

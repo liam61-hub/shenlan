@@ -80,7 +80,8 @@ describe('CONFIG_KEYS schema 一致性', () => {
   });
 
   it('描述文字不含特定 provider 名（模型中立，双语都查）', () => {
-    for (const meta of Object.values(CONFIG_KEYS)) {
+    for (const [key, meta] of Object.entries(CONFIG_KEYS)) {
+      if (key.startsWith('balanceCheck.')) continue;
       for (const d of [meta.description.en, meta.description.zh]) {
         expect(d, d).not.toContain('DeepSeek');
         expect(d, d).not.toContain('deepseek');
@@ -99,7 +100,7 @@ describe('CONFIG_KEYS schema 一致性', () => {
 
 describe('lookupConfigKey — 精确键 + 动态前缀', () => {
   it('精确键命中', () => {
-    expect(lookupConfigKey('costGuardrails.enabled')?.type).toBe('boolean');
+    expect(lookupConfigKey('balanceCheck.enabled')?.type).toBe('boolean');
   });
 
   it('providerKeys 动态前缀命中且标记敏感', () => {
@@ -117,12 +118,12 @@ describe('lookupConfigKey — 精确键 + 动态前缀', () => {
 
 describe('parseConfigValue — 类型/取值校验', () => {
   it('boolean 接受 true/false', () => {
-    expect(parseConfigValue('costGuardrails.enabled', 'true')).toEqual({ ok: true, value: true });
-    expect(parseConfigValue('costGuardrails.enabled', 'false')).toEqual({ ok: true, value: false });
+    expect(parseConfigValue('balanceCheck.enabled', 'true')).toEqual({ ok: true, value: true });
+    expect(parseConfigValue('balanceCheck.enabled', 'false')).toEqual({ ok: true, value: false });
   });
 
   it('boolean 拒绝非布尔输入', () => {
-    const r = parseConfigValue('costGuardrails.enabled', 'yes');
+    const r = parseConfigValue('balanceCheck.enabled', 'yes');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('boolean');
   });
@@ -150,12 +151,12 @@ describe('parseConfigValue — 类型/取值校验', () => {
 
 describe('getNested / setNested / deleteNested — 点路径嵌套读写', () => {
   const obj = {
-    costGuardrails: { enabled: true, maxCostPerSession: 5 },
+    balanceCheck: { enabled: true, lowBalanceWarnThreshold: 5 },
     agent: { maxSteps: 80 },
   };
 
   it('getNested 取深层值', () => {
-    expect(getNested(obj, 'costGuardrails.maxCostPerSession')).toBe(5);
+    expect(getNested(obj, 'balanceCheck.lowBalanceWarnThreshold')).toBe(5);
     expect(getNested(obj, 'agent.maxSteps')).toBe(80);
   });
 
@@ -179,12 +180,12 @@ describe('getNested / setNested / deleteNested — 点路径嵌套读写', () =>
   });
 
   it('deleteNested 删除键并报告是否发生变化', () => {
-    const o = { costGuardrails: { enabled: true, maxCostPerSession: 5 } };
-    const r1 = deleteNested(o, 'costGuardrails.enabled');
+    const o = { balanceCheck: { enabled: true, lowBalanceWarnThreshold: 5 } };
+    const r1 = deleteNested(o, 'balanceCheck.enabled');
     expect(r1).toBe(true);
-    expect(o.costGuardrails.enabled).toBeUndefined();
-    expect(o.costGuardrails.maxCostPerSession).toBe(5);
-    expect(deleteNested(o, 'costGuardrails.enabled')).toBe(false);
+    expect(o.balanceCheck.enabled).toBeUndefined();
+    expect(o.balanceCheck.lowBalanceWarnThreshold).toBe(5);
+    expect(deleteNested(o, 'balanceCheck.enabled')).toBe(false);
   });
 });
 

@@ -59,20 +59,10 @@ export interface AgentConfig {
   maxBackground?: number;
 }
 
-/** 成本护栏配置 */
-export interface CostGuardrailsConfig {
-  /** 是否启用成本护栏 */
+/** Optional startup check for DeepSeek account availability. */
+export interface BalanceCheckConfig {
   enabled: boolean;
-  /** 单会话成本上限（CNY） */
-  maxCostPerSession: number;
-  /** 单日成本上限（CNY） */
-  maxCostPerDay: number;
-  /** 货币单位 */
-  currency: string;
-  /** 启动时预检 DeepSeek 余额（/user/balance，默认开；无 key 静默跳过） */
-  balanceCheckBeforeStart?: boolean;
-  /** 余额低于该值（CNY）时启动告警 */
-  lowBalanceWarnThreshold?: number;
+  lowBalanceWarnThreshold: number;
 }
 
 /** Auto Memory 配置（模型自主保存跨会话记忆，对齐 Claude Code） */
@@ -238,8 +228,8 @@ export interface ShenlanConfig {
   agent?: AgentConfig;
   /** 上下文管理（压缩阈值、保留轮数、工具输出上限） */
   context?: ContextConfig;
-  /** 成本护栏（单会话/单日上限：每次 LLM 调用前检查，超限停止当前任务；单日按本地日期持久化在 ~/.shenlan/cost-ledger.json） */
-  costGuardrails?: CostGuardrailsConfig;
+  /** DeepSeek 余额启动预检（不参与请求拦截） */
+  balanceCheck?: BalanceCheckConfig;
   /** Auto Memory（默认开启；false 时模型侧不可见 memory_save 工具） */
   memory?: MemoryConfig;
   /** 交互式启动版本检查（非阻塞、24 小时缓存）。 */
@@ -504,12 +494,8 @@ export const DEFAULT_CONFIG: ShenlanConfig = {
     maxMemoryTokens: 4096,
     thinkingOutputFloor: 16384,
   },
-  costGuardrails: {
+  balanceCheck: {
     enabled: true,
-    maxCostPerSession: 5,
-    maxCostPerDay: 20,
-    currency: 'CNY',
-    balanceCheckBeforeStart: true,
     lowBalanceWarnThreshold: 1,
   },
   memory: {
@@ -598,6 +584,26 @@ function loadJsonFile(filePath: string): Record<string, unknown> | null {
   }
 }
 
+/** Read legacy balance fields while dropping the retired cost guardrail configuration. */
+function migrateLegacyBalanceConfig(raw: Record<string, unknown>): Record<string, unknown> {
+  const legacy = raw.costGuardrails;
+  if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) return raw;
+  const old = legacy as Record<string, unknown>;
+  const current = raw.balanceCheck && typeof raw.balanceCheck === 'object' && !Array.isArray(raw.balanceCheck)
+    ? raw.balanceCheck as Record<string, unknown>
+    : {};
+  const balanceCheck = { ...current };
+  if (balanceCheck.enabled === undefined && typeof old.balanceCheckBeforeStart === 'boolean') {
+    balanceCheck.enabled = old.balanceCheckBeforeStart;
+  }
+  if (balanceCheck.lowBalanceWarnThreshold === undefined && typeof old.lowBalanceWarnThreshold === 'number') {
+    balanceCheck.lowBalanceWarnThreshold = old.lowBalanceWarnThreshold;
+  }
+  const migrated: Record<string, unknown> = { ...raw, balanceCheck };
+  delete migrated.costGuardrails;
+  return migrated;
+}
+
 /**
  * 加载所有配置并合并
  */
@@ -614,7 +620,7 @@ export function loadConfig(cwd?: string): ShenlanConfig {
   }
   const globalConfig = loadJsonFile(globalPath);
   if (globalConfig) {
-    config = deepMerge(config as unknown as Record<string, unknown>, globalConfig) as unknown as ShenlanConfig;
+    config = deepMerge(config as unknown as Record<string, unknown>, migrateLegacyBalanceConfig(globalConfig)) as unknown as ShenlanConfig;
   }
 
   // 2. 项目配置 <cwd>/.shenlan/config.json
@@ -632,7 +638,7 @@ export function loadConfig(cwd?: string): ShenlanConfig {
         m.maxTokens === LEGACY_PROJECT_DEFAULT_MODEL.maxTokens) {
       delete projectConfig.model;
     }
-    config = deepMerge(config as unknown as Record<string, unknown>, projectConfig) as unknown as ShenlanConfig;
+    config = deepMerge(config as unknown as Record<string, unknown>, migrateLegacyBalanceConfig(projectConfig)) as unknown as ShenlanConfig;
   }
 
   // 3. 环境变量覆盖

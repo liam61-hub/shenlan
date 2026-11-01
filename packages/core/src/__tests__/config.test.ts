@@ -47,11 +47,9 @@ describe('DEFAULT_CONFIG', () => {
     expect(DEFAULT_CONFIG.context?.compactModel).toBe('');
   });
 
-  it('has costGuardrails defaults', () => {
-    expect(DEFAULT_CONFIG.costGuardrails?.enabled).toBe(true);
-    expect(DEFAULT_CONFIG.costGuardrails?.maxCostPerSession).toBe(5);
-    expect(DEFAULT_CONFIG.costGuardrails?.maxCostPerDay).toBe(20);
-    expect(DEFAULT_CONFIG.costGuardrails?.currency).toBe('CNY');
+  it('has a separate balance precheck config', () => {
+    expect(DEFAULT_CONFIG.balanceCheck).toEqual({ enabled: true, lowBalanceWarnThreshold: 1 });
+    expect('costGuardrails' in DEFAULT_CONFIG).toBe(false);
   });
 });
 
@@ -602,5 +600,28 @@ describe('detectProviderFromUrl — 三家新域名（B1）', () => {
 
   it('自建网关仍返回空串（一律尊重显式配置）', () => {
     expect(detectProviderFromUrl('https://oneapi.example.com/v1')).toBe('');
+  });
+});
+
+describe('loadConfig — legacy balance settings', () => {
+  it('migrates old balance precheck fields while dropping the retired guardrail block', () => {
+    const root = mkdtempSync(join(tmpdir(), 'shenlan-legacy-balance-'));
+    const cwd = join(root, 'project');
+    const previousConfigDir = process.env.SHENLAN_CONFIG_DIR;
+    try {
+      process.env.SHENLAN_CONFIG_DIR = join(root, 'global');
+      mkdirSync(join(cwd, '.shenlan'), { recursive: true });
+      writeFileSync(join(cwd, '.shenlan', 'config.json'), JSON.stringify({
+        costGuardrails: { enabled: false, maxCostPerSession: 0, balanceCheckBeforeStart: false, lowBalanceWarnThreshold: 2.5 },
+      }), 'utf-8');
+
+      const config = loadConfig(cwd);
+      expect(config.balanceCheck).toEqual({ enabled: false, lowBalanceWarnThreshold: 2.5 });
+      expect('costGuardrails' in config).toBe(false);
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.SHENLAN_CONFIG_DIR;
+      else process.env.SHENLAN_CONFIG_DIR = previousConfigDir;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

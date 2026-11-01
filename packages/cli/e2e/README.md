@@ -74,3 +74,15 @@ SHENLAN_E2E_LIVE=1 node packages/cli/e2e/vision_e2e.mjs   # 单跑
 - PASS 判定：HTTP 200 + 模型返回非空图片描述（1x1 透明 PNG）
 - 退出码：`0` PASS / `77` SKIP（未 opt-in 或无 key）/ 其他 FAIL
 - 若 FAIL：检查 `QWEN_API_KEY` / `providerKeys.qwen` 与 dashscope 端点连通性
+
+## 模型兼容矩阵
+
+矩阵区分协议级覆盖和真实服务验证。自动化 mock 测试不代表对每个厂商服务或模型版本做过真机认证。
+
+| 模型/端点 | 兼容范围 | 验证覆盖 | 真机状态 |
+|---|---|---|---|
+| DeepSeek、Qwen、OpenAI 及符合 OpenAI Chat Completions 协议的端点 | 文本对话；工具调用能力取决于端点和模型 | 单元测试与本地 mock E2E 覆盖请求、流式响应和工具循环 | 未纳入定期真机检查；不得据协议测试推断厂商可用性 |
+| Qwen `qwen-vl-max` | OpenAI 兼容 `image_url` 图片输入 | `vision_e2e.mjs` 可选真机检查 | 每次 runner 执行会报告 `PASS`、`FAIL` 或 `SKIP(原因)`；未设置 `SHENLAN_E2E_LIVE=1` 或缺少 Qwen key 时必须显示 `SKIP` |
+| 自定义第三方 OpenAI 兼容端点 | 配置 Base URL、Key 和模型 ID 后尝试文本对话；其他能力由服务端决定 | 配置、协议封装和错误处理有本地测试 | 无通用真机保证；未执行的厂商/模型检查应明确记为 `SKIP`，不能记为 `PASS` |
+
+`npm run test:e2e` 的汇总是当前 live 检查状态的事实来源。只有脚本实际连接服务并通过断言才能显示 `PASS`；未 opt-in、缺少凭据或未配置 live 脚本时应显示 `SKIP` 并给出原因。

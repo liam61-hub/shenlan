@@ -15,8 +15,7 @@ import {
   buildSystemPrompt,
   DEFAULT_MEMORY_TOKEN_BUDGET,
   getAvailableTools,
-  getTool,
-  executeToolWithTimeout,
+  executeToolCall,
   estimateTotalTokens,
   compressMessagesV2,
   buildSkillScanDirs,
@@ -24,6 +23,7 @@ import {
   resolveModelProvider,
   resolveBaseUrl,
   estimateCost,
+  recordUsage,
   formatApiError,
   unregisterGoalComplete,
   IMAGE_MIMES,
@@ -35,6 +35,14 @@ import { routeModel, getModelContextWindow, detectModality, isVisionModel, pickV
 import { attachInputImages } from './image-input.js';
 import { computeToolSig, RepeatTracker, LOOP_REPEAT_THRESHOLD } from './loop-detect.js';
 
+function outputBudgetFor(config: ShenlanConfig, model: string): number {
+  return resolveMaxOutputTokens(model, {
+    configured: config.model.maxTokens || 8192,
+    capOverride: config.model.maxOutputTokens,
+    thinkingFloor: config.context?.thinkingOutputFloor,
+  });
+}
+
 /** headless 运行结果 */
 export interface RunResult {
   status: 'completed' | 'failed' | 'limit_stopped';
@@ -42,7 +50,7 @@ export interface RunResult {
   steps: number;
   cost: { promptTokens: number; completionTokens: number };
   /** 折算成本（CNY） */
-  costCny: number;
+  localEstimateCny: number | null;
   output?: string;
   error?: string;
 }
@@ -66,11 +74,7 @@ function callLLM(
       model,
       apiKey: resolveApiKey(config, provider),
       // 思考模型的推理与正文共享输出预算：抬到思考下限，避免正文被饿成空（长任务必踩）
-      maxTokens: resolveMaxOutputTokens(model, {
-        configured: config.model.maxTokens || 8192,
-        capOverride: config.model.maxOutputTokens,
-        thinkingFloor: config.context?.thinkingOutputFloor,
-      }),
+      maxTokens: outputBudgetFor(config, model),
     };
     chatStream(
       modelConfig,
@@ -94,37 +98,23 @@ async function executeTools(
   toolCalls: NonNullable<Message['tool_calls']>,
   readonly: boolean,
   model: string,
+  config: ShenlanConfig,
 ): Promise<Message[]> {
   const results: Message[] = [];
 
   for (const tc of toolCalls) {
     const toolName = tc.function.name;
 
-    // readonly 模式：只放行读操作
-    if (readonly && !['read', 'search'].includes(toolName)) {
-      results.push({
-        role: 'tool',
-        content: `[readonly] Tool "${toolName}" blocked — only read/search allowed in readonly mode`,
-        tool_call_id: tc.id,
-        name: toolName,
-      });
-      continue;
-    }
-
-    const tool = getTool(toolName);
-    if (!tool) {
-      results.push({
-        role: 'tool',
-        content: `Unknown tool: ${toolName}`,
-        tool_call_id: tc.id,
-        name: toolName,
-      });
-      continue;
-    }
-
     try {
-      const args = JSON.parse(tc.function.arguments || '{}');
-      const result = await executeToolWithTimeout(tool, args, {});
+      const args: unknown = JSON.parse(tc.function.arguments || '{}');
+      const result = await executeToolCall(toolName, args, {
+        permissions: config.permissions,
+        cwd: process.cwd(),
+        auditEnabled: config.actionSafety?.auditEnabled,
+        additionalDecision: readonly
+          ? (name) => ['read', 'search'].includes(name) ? 'allow' : 'deny'
+          : undefined,
+      });
 
       // 视觉模型 + 工具携带图片 → 追加 image_url 内容块（toolResultToMessages 展开）
       results.push(...toolResultToMessages({
@@ -190,6 +180,10 @@ export async function runTask(
   unregisterGoalComplete();
   let totalPrompt = 0;
   let totalCompletion = 0;
+  let usageCalls = 0;
+  const localEstimate = (): number | null => usageCalls > 0
+    ? estimateCost(routedModel, totalPrompt, totalCompletion)
+    : null;
   let lastContent = '';
   const repeatTracker = new RepeatTracker();
   let noProgressRounds = 0;
@@ -225,13 +219,18 @@ export async function runTask(
 
     const { assistantMsg, usage, error } = await callLLM(config, messages, tools, routedModel);
 
+    if (usage && !error) {
+      recordUsage(routedModel, usage.promptTokens, usage.completionTokens);
+      usageCalls++;
+    }
+
     if (error) {
       return {
         status: 'failed',
         summary: lastContent.slice(0, 200) || '(no output)',
         steps: round + 1,
         cost: { promptTokens: totalPrompt, completionTokens: totalCompletion },
-        costCny: estimateCost(routedModel, totalPrompt, totalCompletion),
+        localEstimateCny: localEstimate(),
         error: formatApiError(error),
       };
     }
@@ -242,7 +241,7 @@ export async function runTask(
         summary: '(empty response)',
         steps: round + 1,
         cost: { promptTokens: totalPrompt, completionTokens: totalCompletion },
-        costCny: estimateCost(routedModel, totalPrompt, totalCompletion),
+        localEstimateCny: localEstimate(),
         error: 'No assistant message returned',
       };
     }
@@ -266,7 +265,7 @@ export async function runTask(
         steps: round + 1,
         output: lastContent,
         cost: { promptTokens: totalPrompt, completionTokens: totalCompletion },
-        costCny: estimateCost(routedModel, totalPrompt, totalCompletion),
+        localEstimateCny: localEstimate(),
       };
     }
 
@@ -280,14 +279,14 @@ export async function runTask(
           summary: `Loop detected: "${tc.function.name}" called ${count}x with same args`,
           steps: round + 1,
           cost: { promptTokens: totalPrompt, completionTokens: totalCompletion },
-          costCny: estimateCost(routedModel, totalPrompt, totalCompletion),
+          localEstimateCny: localEstimate(),
           error: `Tool loop: ${tc.function.name} x${count}`,
         };
       }
     }
 
     // 执行工具
-    const toolResults = await executeTools(assistantMsg.tool_calls, !!options.readonly, routedModel);
+    const toolResults = await executeTools(assistantMsg.tool_calls, !!options.readonly, routedModel, config);
     messages.push(...toolResults);
   }
 
@@ -297,6 +296,6 @@ export async function runTask(
     summary: `${lastContent.slice(0, 200) || '(no output)'} — reached max steps (${maxSteps})`,
     steps: maxSteps,
     cost: { promptTokens: totalPrompt, completionTokens: totalCompletion },
-    costCny: estimateCost(routedModel, totalPrompt, totalCompletion),
+    localEstimateCny: localEstimate(),
   };
 }

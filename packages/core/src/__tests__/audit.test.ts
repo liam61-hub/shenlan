@@ -28,7 +28,7 @@ describe('动作级审计（.shenlan/audit.jsonl）', () => {
     expect(events[1]).toMatchObject({ rule: 'confirm', result: 'allowed' });
   });
 
-  it('参数摘要过 maskSensitive 脱敏（API key 不落盘明文）', () => {
+  it('参数摘要只保留字段级元数据（不落盘命令正文或凭据）', () => {
     recordAuditEvent({
       tool: 'shell',
       args: { command: 'curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc123" x' },
@@ -36,6 +36,8 @@ describe('动作级审计（.shenlan/audit.jsonl）', () => {
       result: 'allowed',
     }, cwd, true);
     const [ev] = readAuditEvents(cwd);
+    expect(ev!.args).toContain('[REDACTED]');
+    expect(ev!.args).not.toContain('curl');
     expect(ev!.args).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
   });
 
@@ -53,7 +55,8 @@ describe('动作级审计（.shenlan/audit.jsonl）', () => {
     }
     const events = readAuditEvents(cwd, 3);
     expect(events).toHaveLength(3);
-    expect(events[2]!.args).toContain('cmd-4');
+    expect(events[2]!.args).not.toContain('cmd-4');
+    expect(events[2]!.args).toContain('[REDACTED]');
   });
 
   it('无审计文件时返回空数组', () => {

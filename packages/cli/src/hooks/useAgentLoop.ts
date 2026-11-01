@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useCallback } from 'react';
 import type { Dispatch } from 'react';
-import { getTodos, getPlan, recordUsage, clearTodos, clearPlan, abortAllBackgroundTasks } from '@shenlan/core';
+import { getTodos, getPlan, clearTodos, clearPlan, abortAllBackgroundTasks, syncSessionMessages } from '@shenlan/core';
 import type { ShenlanConfig, TokenUsage } from '@shenlan/core';
 import type { AppAction, AppState } from '../context.js';
 import { runAgentLoop } from '../repl.js';
@@ -138,7 +138,7 @@ export function useAgentLoop({ state, dispatch, config }: UseAgentLoopParams) {
             onToolDone(id: string, name: string, detail: string, resultContent?: string, fileChange?: FileChange) {
               if (currentRunId !== runIdRef.current) return;
               dispatch({ type: 'TOOL_DONE', id, name, detail });
-              // goal 模式：模型调用 goal_complete → 状态置 completed（/budget 展示）
+              // goal 模式：模型调用 goal_complete → 状态置 completed
               if (name === 'goal_complete') {
                 dispatch({ type: 'GOAL_COMPLETE' });
               }
@@ -179,39 +179,6 @@ export function useAgentLoop({ state, dispatch, config }: UseAgentLoopParams) {
               flushTokens();
               return new Promise<string>((resolve) => {
                 confirmResolver = resolve;
-                if (info.kind === 'cost-guardrail') {
-                  const isDay = info.guardKind === 'day';
-                  const zh = info.language === 'zh-CN';
-                  const options = isDay
-                    ? [
-                        { label: zh ? '停止任务（默认）' : 'Stop task (default)', key: '1', value: 'stop' },
-                        { label: zh ? '今日豁免并继续' : 'Continue for today', key: '2', value: 'continue' },
-                        { label: zh ? '调高单日上限（输入新值）' : 'Enter a new daily limit', key: '3', value: 'feedback' },
-                      ]
-                    : [
-                        { label: zh ? '停止任务（默认）' : 'Stop task (default)', key: '1', value: 'stop' },
-                        { label: zh ? '本次继续（仅本会话）' : 'Continue this session', key: '2', value: 'continue' },
-                        { label: zh ? '调高本会话上限（输入新值）' : 'Enter a new session limit', key: '3', value: 'feedback' },
-                      ];
-                  dispatch({
-                    type: 'CONFIRM_PROMPT',
-                    prompt: {
-                      kind: 'cost-guardrail',
-                      language: info.language,
-                      title: zh ? `成本护栏已触发（${isDay ? '单日上限' : '本会话上限'}）` : `Cost limit reached (${isDay ? 'daily' : 'session'})`,
-                      detail: [info.reason || (zh ? '成本已达上限' : 'Cost limit reached')],
-                      toolName: 'cost-guardrail',
-                      description: info.description,
-                      options,
-                      selected: 0,
-                      feedbackMode: false,
-                      feedbackText: '',
-                      feedbackLabel: zh ? (isDay ? '输入新的单日上限（CNY，如 50）：' : '输入新的本会话上限（CNY，如 10）：') : `Enter new ${isDay ? 'daily' : 'session'} limit (CNY):`,
-                      footerHint: zh ? '↑/↓ 选择 · Enter 确认 · Esc 调高上限 · Ctrl+C 终止' : '↑/↓ select · Enter confirm · Esc change limit · Ctrl+C abort',
-                    },
-                  });
-                  return;
-                }
                 const kind = info.kind;
                 dispatch({
                   type: 'CONFIRM_PROMPT',
@@ -239,10 +206,6 @@ export function useAgentLoop({ state, dispatch, config }: UseAgentLoopParams) {
                 });
               });
             },
-            onCost(model: string, promptTokens: number, completionTokens: number) {
-              // 每轮真实 usage 记账（含工具调用轮），供 /cost /budget 展示
-              recordUsage(model, promptTokens, completionTokens);
-            },
             onModel(model: string) {
               if (currentRunId !== runIdRef.current) return;
               // 实际生效模型同步到 UI（底部状态行/顶部头部显示，sticky 路由优先）
@@ -256,6 +219,9 @@ export function useAgentLoop({ state, dispatch, config }: UseAgentLoopParams) {
             onComplete(usage?: TokenUsage) {
               if (currentRunId !== runIdRef.current) return;
               flushTokens();
+              // A completed turn is durable before the UI reports completion.
+              // The shared messages array already contains the final assistant/tool messages here.
+              syncSessionMessages(state.sessionId, state.messages);
               // 任务结束清理本次任务的 todo/plan（plan 模式保留：计划是跨轮产物）
               if (getMode() !== 'plan') {
                 clearTodos();

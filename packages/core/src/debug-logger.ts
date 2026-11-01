@@ -1,17 +1,22 @@
 /**
  * 调试日志 — 写入 .shenlan/debug-YYYY-MM-DD.log，保留最近 7 天
  *
- * 仅在 SHENLAN_DEBUG=0 环境变量时关闭（默认开启）
+ * 仅在 SHENLAN_DEBUG=1 时显式启用；日志保留最近 7 天。
  */
-import { appendFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readdirSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
+import { sanitizeLogMetadata, sanitizeLogSection } from './log-sanitizer.js';
 
-const DEBUG_ENABLED = process.env.SHENLAN_DEBUG !== '0';
+const DEBUG_ENABLED = process.env.SHENLAN_DEBUG === '1';
 const MAX_DAYS = 7;
+const MAX_LOG_BYTES = 256 * 1024;
 
 function getLogDir(): string {
-  const dir = join(process.cwd(), '.shenlan');
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const dir = join(process.env.SHENLAN_DEBUG_LOG_DIR || process.cwd(), '.shenlan');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') {
+    try { chmodSync(dir, 0o700); } catch { /* keep diagnostics best-effort */ }
+  }
   return dir;
 }
 
@@ -19,6 +24,19 @@ function getLogPath(): string {
   const now = new Date();
   const date = now.toISOString().slice(0, 10); // YYYY-MM-DD
   return join(getLogDir(), `debug-${date}.log`);
+}
+
+function appendBoundedLog(text: string): void {
+  const path = getLogPath();
+  const data = Buffer.from(text, 'utf-8');
+  const fd = openSync(path, 'a', 0o600);
+  try {
+    if (process.platform !== 'win32') fchmodSync(fd, 0o600);
+    if (fstatSync(fd).size + data.byteLength > MAX_LOG_BYTES) return;
+    writeSync(fd, data);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function cleanupOldLogs(): void {
@@ -42,7 +60,7 @@ function cleanupOldLogs(): void {
   try {
     cleanupOldLogs();
     const now = new Date().toISOString().replace('T', ' ').slice(0, 23);
-    appendFileSync(getLogPath(), `\n=== shenlan started [${now}] ===\ncwd: ${process.cwd()}\nargv: ${process.argv.slice(2).join(' ') || '(none)'}\n`, 'utf-8');
+    appendBoundedLog(`\n=== shenlan started [${now}] ===\n`);
   } catch { /* silent */ }
 })();
 
@@ -54,14 +72,11 @@ export function debugLog(section: string, data: Record<string, unknown>): void {
   if (!DEBUG_ENABLED) return;
   try {
     const lines: string[] = [];
-    lines.push(`\n=== ${section} [${timestamp()}] ===`);
-    for (const [key, value] of Object.entries(data)) {
-      const val = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-      // Truncate very long values
-      const truncated = val.length > 3000 ? val.slice(0, 3000) + '\n... (truncated)' : val;
-      lines.push(`${key}: ${truncated}`);
+    lines.push(`\n=== ${sanitizeLogSection(section)} [${timestamp()}] ===`);
+    for (const [key, value] of Object.entries(sanitizeLogMetadata(data))) {
+      lines.push(`${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
     }
-    appendFileSync(getLogPath(), lines.join('\n') + '\n', 'utf-8');
+    appendBoundedLog(lines.join('\n') + '\n');
   } catch {
     // 静默失败，不影响主流程
   }

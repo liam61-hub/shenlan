@@ -11,7 +11,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
     ...actual,
     chatStream: vi.fn(),
     chat: vi.fn().mockRejectedValue(new Error('mock: no network')),
-    executeToolWithTimeout: vi.fn(async () => ({ content: 'executed ok', isError: false })),
+    executeToolCall: vi.fn(async () => ({ status: 'executed', content: 'executed ok', isError: false })),
     getAvailableTools: vi.fn(() => []),
     getTool: vi.fn(() => ({
       name: 'shell',
@@ -22,7 +22,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
   };
 });
 
-import { chatStream, executeToolWithTimeout } from '@shenlan/core';
+import { chatStream, executeToolCall } from '@shenlan/core';
 import { runAgentLoop, resetStop } from '../repl.js';
 import type { AgentCallbacks } from '../repl.js';
 import { setMode } from '../mode.js';
@@ -82,7 +82,7 @@ function harness(onConfirm: AgentCallbacks['onConfirm']) {
     onConfirm,
     onComplete: () => { events.push({ kind: 'complete' }); },
     onError: (err: Error) => { events.push({ kind: 'error', detail: err.message }); },
-    onNotice: () => {},
+    onNotice: (detail) => { events.push({ kind: 'notice', detail }); },
   };
   return { events, callbacks };
 }
@@ -108,7 +108,7 @@ describe('高危命令预检（repl）', () => {
     await runAgentLoop('', configWith('deny'), messages, callbacks);
 
     expect(confirmCalls).toBe(0);
-    expect(vi.mocked(executeToolWithTimeout)).not.toHaveBeenCalled();
+    expect(vi.mocked(executeToolCall)).not.toHaveBeenCalled();
     const toolMsgs = messages.filter(m => m.role === 'tool').map(m => m.content ?? '');
     expect(toolMsgs.join('\n')).toContain('HIGH RISK');
   });
@@ -122,7 +122,7 @@ describe('高危命令预检（repl）', () => {
     await runAgentLoop('', configWith('confirm'), messages, callbacks);
 
     expect(confirmCalls).toBe(1);
-    expect(vi.mocked(executeToolWithTimeout)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(executeToolCall)).toHaveBeenCalledTimes(1);
     const toolMsgs = messages.filter(m => m.role === 'tool').map(m => m.content ?? '');
     expect(toolMsgs.join('\n')).not.toContain('HIGH RISK');
   });
@@ -134,7 +134,7 @@ describe('高危命令预检（repl）', () => {
     const messages: Message[] = [{ role: 'user', content: '删掉临时目录' }];
     await runAgentLoop('', configWith('confirm'), messages, callbacks);
 
-    expect(vi.mocked(executeToolWithTimeout)).not.toHaveBeenCalled();
+    expect(vi.mocked(executeToolCall)).not.toHaveBeenCalled();
     const toolMsgs = messages.filter(m => m.role === 'tool').map(m => m.content ?? '');
     expect(toolMsgs.join('\n')).toContain('denied');
   });
@@ -147,8 +147,30 @@ describe('高危命令预检（repl）', () => {
     const messages: Message[] = [{ role: 'user', content: '构建' }];
     await runAgentLoop('', configWith('deny'), messages, callbacks);
 
-    expect(vi.mocked(executeToolWithTimeout)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(executeToolCall)).toHaveBeenCalledTimes(1);
     const toolMsgs = messages.filter(m => m.role === 'tool').map(m => m.content ?? '');
     expect(toolMsgs.join('\n')).not.toContain('HIGH RISK');
+  });
+
+  it('Plan 模式下不在只读白名单的 shell 命令不会进入执行边界', async () => {
+    setMode('plan');
+    const { callbacks } = harness(async () => 'allow');
+    installChatScript([() => shellCall('npm run build'), () => textMsg('(end)')]);
+
+    const messages: Message[] = [{ role: 'user', content: '执行构建' }];
+    await runAgentLoop('', configWith('deny'), messages, callbacks);
+
+    expect(vi.mocked(executeToolCall)).not.toHaveBeenCalled();
+    expect(messages.filter(m => m.role === 'tool').map(m => m.content ?? '').join('\n')).toContain('[PLAN MODE]');
+  });
+
+  it('goal mode can continue regardless of prior estimated usage', async () => {
+    const { callbacks, events } = harness(async () => 'allow');
+    installChatScript([() => textMsg('done')]);
+    await runAgentLoop('', configWith('deny'), [{ role: 'user', content: 'continue goal' }], callbacks, undefined, {
+      text: 'finish goal', status: 'active',
+    });
+    expect(vi.mocked(chatStream)).toHaveBeenCalled();
+    expect(events.filter(event => event.kind === 'complete')).toHaveLength(1);
   });
 });

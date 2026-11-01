@@ -24,7 +24,7 @@ import {
   DEFAULT_MEMORY_TOKEN_BUDGET,
   getAvailableTools,
   getTool,
-  executeToolWithTimeout,
+  executeToolCall,
   debugLog,
   estimateTotalTokens,
   compressMessagesV2,
@@ -39,16 +39,11 @@ import {
   resolveBaseUrl,
   expandHome,
   ERR_CODES,
-  checkCostGuardrail,
+  recordUsage,
   formatApiError,
-  waiveSession,
-  waiveDay,
   registerGoalComplete,
   unregisterGoalComplete,
-  updateConfig,
-  formatCost,
   getSessionCost,
-  getDailyCost,
   consumePendingInjections,
   abortAllBackgroundTasks,
   isHighRiskCommand,
@@ -132,7 +127,7 @@ export interface AgentCallbacks {
 export interface ConfirmRequestInfo {
   toolName: string;
   description: string;
-  kind: 'edit' | 'create' | 'external' | 'destructive' | 'command' | 'cost-guardrail' | 'high-risk';
+  kind: 'edit' | 'create' | 'external' | 'destructive' | 'command' | 'high-risk';
   language: Lang;
   /** 文件操作涉及的文件绝对路径（write/edit） */
   paths: string[];
@@ -141,10 +136,6 @@ export interface ConfirmRequestInfo {
   /** 会话级授权范围的可见描述 */
   prefix: string;
   commandGrant?: CommandGrant;
-  /** cost-guardrail 专用：触发维度 */
-  guardKind?: 'session' | 'day';
-  /** cost-guardrail 专用：触发原因 */
-  reason?: string;
   /** high-risk 专用：命中的高危模式 */
   pattern?: string;
   /** high-risk 专用：反馈输入框提示（输入确认短语） */
@@ -168,23 +159,6 @@ function applyGoalBlock(messages: Message[], goalText: string | null): void {
     ? `\n\n<!-- shenlan-goal -->\n## 当前目标（goal mode）\n${goalText}\n持续执行直到目标达成；完成时调用 goal_complete(reason) 工具结束。\n<!-- /shenlan-goal -->`
     : '';
   messages[sysIdx] = { ...messages[sysIdx]!, content: base + block };
-}
-
-/** 构建成本护栏确认请求（选项由 UI 层按 guardKind 生成） */
-function buildCostGuardrailConfirm(guard: ReturnType<typeof checkCostGuardrail>, language: Lang, config: ShenlanConfig): ConfirmRequestInfo {
-  const isDay = guard.kind === 'day';
-  const englishReason = `${isDay ? 'Today' : 'This session'}: ${formatCost(isDay ? getDailyCost().costCny : getSessionCost().costCny)} reached the ${isDay ? 'daily' : 'session'} limit of ${formatCost(isDay ? config.costGuardrails?.maxCostPerDay ?? 0 : config.costGuardrails?.maxCostPerSession ?? 0)}`;
-  return {
-    language,
-    toolName: 'cost-guardrail',
-    description: language === 'zh-CN' ? '成本护栏已触发' : 'Cost limit reached',
-    kind: 'cost-guardrail',
-    paths: [],
-    command: '',
-    prefix: '',
-    guardKind: guard.kind,
-    reason: language === 'zh-CN' ? guard.reason || '成本已达上限' : englishReason,
-  };
 }
 
 // Session-level caches
@@ -515,6 +489,29 @@ function needsManualConfirm(
   return true;
 }
 
+/** 把交互确认与会话授权传给 core 边界；显式 deny 仍由 core 优先处理。 */
+function permissionsForToolCall(
+  toolName: string,
+  args: Record<string, unknown>,
+  config: ShenlanConfig,
+  approvedThisCall: boolean,
+): PermissionConfig {
+  const permissions = effectivePermissions(config);
+  const filePath = typeof args.file_path === 'string' ? args.file_path : '';
+  const resolvedPath = filePath ? resolve(process.cwd(), expandHome(filePath)) : '';
+  const shellCommand = toolName === 'shell' ? String(args.command || '') : '';
+  const grantedForSession = sessionAllow.has(toolName)
+    || (['write', 'edit'].includes(toolName) && !!resolvedPath && sessionAllowedPaths.has(resolvedPath))
+    || (toolName === 'shell' && sessionAllowedCommands.some(grant => commandMatchesGrant(shellCommand, grant)));
+  const allow = approvedThisCall || grantedForSession
+    ? [...new Set([...permissions.allow, toolName])]
+    : permissions.allow;
+  const deny = sessionDeny.has(toolName)
+    ? [...new Set([...permissions.deny, toolName])]
+    : permissions.deny;
+  return { ...permissions, allow, deny };
+}
+
 function getToolDetail(toolName: string, argsStr: string): string {
   try {
     const args = JSON.parse(argsStr || '{}');
@@ -590,12 +587,16 @@ async function summarizeWithLLM(
 
   try {
     // 摘要调用最多等 60s，超时视为失败走降级（不阻塞会话）
-    const text = await Promise.race([
-      chat(
+    const summaryRequest = chat(
         { ...config.model, baseUrl: resolveBaseUrl(config, compactModel), model: compactModel, apiKey },
         summaryMessages,
         undefined,
-      ).then((resp) => resp.choices?.[0]?.message?.content?.trim() || ''),
+      ).then((resp) => {
+        if (resp.usage) recordUsage(compactModel, resp.usage.prompt_tokens, resp.usage.completion_tokens);
+        return resp.choices?.[0]?.message?.content?.trim() || '';
+      });
+    const text = await Promise.race([
+      summaryRequest,
       new Promise<string>((resolve) => {
         const timer = setTimeout(() => resolve(''), 60_000);
         timer.unref?.();
@@ -775,10 +776,24 @@ export async function runAgentLoop(
   let loopCorrectionInjected = false;
   let roundsAfterCorrection = 0;
   let thrashStopped = false;
-  /** 本轮运行已预警过的成本占比（避免每轮重复弹 onNotice） */
-  let warnedRatio = 0;
   /** goal 模式：模型已调用 goal_complete，下一轮无工具调用即收尾 */
   let goalAchieved = false;
+  const callAndRecordUsage = async (model: string, maxTokens: number) => {
+    const result = await llmCallOnce(
+      model,
+      config,
+      messages,
+      tools.length > 0 ? tools : undefined,
+      callbacks,
+      signal,
+      maxTokens,
+    );
+    if (result.usage && !result.error) {
+      recordUsage(model, result.usage.promptTokens, result.usage.completionTokens);
+      callbacks.onCost?.(model, result.usage.promptTokens, result.usage.completionTokens);
+    }
+    return result;
+  };
 
   for (let round = 0; round < maxSteps; round++) {
     globalRound++;
@@ -842,65 +857,6 @@ export async function runAgentLoop(
       }
     }
 
-    // 成本护栏：每次 LLM 调用前检查会话/单日上限。
-    // goal 模式只预警不硬停（usage 照常记账）；普通模式超限弹窗让用户选择：
-    // 停止（默认）/ 本次继续（豁免）/ 调高上限（反馈输入新值后写回配置）。
-    // headless run 不经过此循环，护栏仅作用于交互式 CLI。
-    const guard = checkCostGuardrail(config.costGuardrails);
-    if (guard.blocked && goalMode) {
-      if (guard.ratio > warnedRatio) {
-        warnedRatio = guard.ratio;
-        callbacks.onNotice?.(`成本护栏：${guard.reason}（goal 模式仅预警不拦截，/budget 查看）`);
-      }
-    } else if (guard.blocked) {
-      const decision = await callbacks.onConfirm(buildCostGuardrailConfirm(guard, confirmLanguage, config));
-      if (decision === 'stop' || decision === 'deny') {
-        callbacks.onNotice?.(`成本护栏已触发：${guard.reason}（/budget 查看，/clear 重置会话成本）`);
-        callbacks.onComplete();
-        return;
-      }
-      if (decision === 'abort') {
-        callbacks.onError(new Error('已终止'));
-        return;
-      }
-      if (decision === 'continue') {
-        if (guard.kind === 'day') waiveDay();
-        else waiveSession();
-        callbacks.onNotice?.(`已豁免${guard.kind === 'day' ? '今日' : '本会话'}上限，继续执行`);
-      } else if (decision.startsWith('deny_feedback:')) {
-        const raw = decision.slice('deny_feedback:'.length).trim();
-        const val = Number(raw);
-        if (Number.isFinite(val) && val > 0) {
-          const current = config.costGuardrails ?? {
-            enabled: true,
-            maxCostPerSession: 5,
-            maxCostPerDay: 20,
-            currency: 'CNY',
-          };
-          const next: NonNullable<ShenlanConfig['costGuardrails']> = {
-            enabled: current.enabled ?? true,
-            maxCostPerSession: current.maxCostPerSession ?? 5,
-            maxCostPerDay: current.maxCostPerDay ?? 20,
-            currency: current.currency ?? 'CNY',
-          };
-          if (guard.kind === 'day') next.maxCostPerDay = val;
-          else next.maxCostPerSession = val;
-          config.costGuardrails = next;
-          try {
-            updateConfig({ costGuardrails: next }, { scope: 'global' });
-          } catch { /* 写失败不阻断本次运行 */ }
-          callbacks.onNotice?.(`已调高${guard.kind === 'day' ? '单日' : '本会话'}上限至 ${formatCost(val)}`);
-        } else {
-          callbacks.onNotice?.(`无效上限 "${raw}"，本次已停止`);
-          callbacks.onComplete();
-          return;
-        }
-      }
-    } else if (!goalMode && guard.level === 'warn' && guard.ratio > warnedRatio) {
-      warnedRatio = guard.ratio;
-      callbacks.onNotice?.(`成本预警：已用 ${Math.round(guard.ratio * 100)}%（/budget 查看，超限可弹窗继续）`);
-    }
-
     // 新一轮 LLM 请求开始：通知 UI 进入 thinking（显示 spinner）
     callbacks.onThinkingStart?.();
 
@@ -909,13 +865,13 @@ export async function runAgentLoop(
     //    网络抖动不打断任务（用户中止不重试）
     // 2) provider 故障转移：默认关；5xx/402/429/超时/网络且备用 provider
     //    有 key 时切换同档模型重试一次（§25）
-    let result = await llmCallOnce(stickyModel, config, messages, tools.length > 0 ? tools : undefined, callbacks, signal, budgetFor(stickyModel));
+    let result = await callAndRecordUsage(stickyModel, budgetFor(stickyModel));
     if (result.error && !signal?.aborted && !globalAbort && isNetworkRetryable(result.error)) {
       debugLog('Agent Loop — LLM network error, retrying same provider', {
         round, model: stickyModel, error: result.error.message,
       });
       await new Promise((r) => setTimeout(r, 500));
-      const retry = await llmCallOnce(stickyModel, config, messages, tools.length > 0 ? tools : undefined, callbacks, signal, budgetFor(stickyModel));
+      const retry = await callAndRecordUsage(stickyModel, budgetFor(stickyModel));
       if (!retry.error) {
         debugLog('Agent Loop — LLM network retry succeeded', { round, model: stickyModel });
         result = retry;
@@ -928,7 +884,7 @@ export async function runAgentLoop(
       });
       forceBaselineBudget = true;
       maxTokensOverride = undefined;
-      const baseline = await llmCallOnce(stickyModel, config, messages, tools.length > 0 ? tools : undefined, callbacks, signal, configuredMaxTokens);
+      const baseline = await callAndRecordUsage(stickyModel, configuredMaxTokens);
       if (!baseline.error) {
         callbacks.onNotice?.(`端点不接受放大的输出预算，已回落 max_tokens=${configuredMaxTokens}`);
         result = baseline;
@@ -937,7 +893,7 @@ export async function runAgentLoop(
     if (result.error && config.providerFailover?.enabled === true) {
       const failoverTarget = findFailoverTarget(stickyModel, config);
       if (failoverTarget && isFailoverRetryable(result.error)) {
-        const second = await llmCallOnce(failoverTarget, config, messages, tools.length > 0 ? tools : undefined, callbacks, signal, budgetFor(failoverTarget));
+        const second = await callAndRecordUsage(failoverTarget, budgetFor(failoverTarget));
         if (!second.error) {
           recordAuditEvent(
             {
@@ -976,16 +932,15 @@ export async function runAgentLoop(
       return;
     }
 
-    if (!assistantMsg) return;
+    if (!assistantMsg) {
+      return;
+    }
 
     // 每轮 LLM 响应都记账（含工具调用轮，它们才是最贵的轮次），
-    // 真实 usage 按价格表折算进会话成本，供 /cost /budget 展示。
-    if (usage) callbacks.onCost?.(stickyModel, usage.promptTokens, usage.completionTokens);
-
+    // 真实 usage 按价格表折算进会话成本，供 /cost 展示。
     debugLog('Agent Loop — assistant message received', {
       round,
       contentLen: (assistantMsg.content || '').length,
-      content: assistantMsg.content || '',
       hasToolCalls: !!(assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0),
       toolCallsCount: assistantMsg.tool_calls?.length || 0,
       toolNames: assistantMsg.tool_calls?.map(tc => tc.function.name).join(', ') || '(none)',
@@ -1137,24 +1092,38 @@ export async function runAgentLoop(
       const toolName = tc.function.name;
       const tool = getTool(toolName);
       let args: Record<string, unknown> = {};
+      let rawArgs: unknown;
 
       try {
-        args = JSON.parse(tc.function.arguments || '{}');
-      } catch { /* ignore */ }
+        rawArgs = JSON.parse(tc.function.arguments || '{}');
+        if (rawArgs !== null && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+          args = rawArgs as Record<string, unknown>;
+        }
+      } catch {
+        rawArgs = tc.function.arguments;
+      }
 
       const detail = getToolDetail(toolName, tc.function.arguments);
       callbacks.onToolStart(tc.id, toolName, detail);
 
       if (!tool) {
+        const result = await executeToolCall(toolName, rawArgs, {
+          permissions: effectivePermissions(config),
+          cwd: process.cwd(),
+          auditEnabled: config.actionSafety?.auditEnabled,
+          signal,
+        });
         messages.push({
           role: 'tool',
-          content: `Unknown tool: ${toolName}`,
+          content: result.content,
           tool_call_id: tc.id,
           name: toolName,
         });
-        callbacks.onToolError(tc.id, toolName, 'unknown tool');
+        callbacks.onToolError(tc.id, toolName, result.content);
         continue;
       }
+
+      let approvedThisCall = false;
 
       // Plan mode block：write/edit 一律拦截；shell 按只读命令白名单判定
       // （白名单命中放行执行，仍走后续权限门与高危拦截；敏感命令无条件 deny）
@@ -1222,7 +1191,10 @@ export async function runAgentLoop(
       }
 
       // Permission check
-      if (needsManualConfirm(toolName, args, config)) {
+      if (
+        !effectivePermissions(config).deny.includes(toolName) &&
+        needsManualConfirm(toolName, args, config)
+      ) {
         const confirmInfo = buildConfirmInfo(toolName, args, confirmLanguage);
         const result = await callbacks.onConfirm(confirmInfo);
 
@@ -1271,7 +1243,7 @@ export async function runAgentLoop(
           continue;
         }
         // 确认放行（allow / allow_session / allow_paths / allow_prefix）
-        recordAudit(toolName, args, 'confirm', 'allowed', config);
+        approvedThisCall = true;
       } else if (needsConfirmation(toolName, effectivePermissions(config))) {
         if (sessionDeny.has(toolName)) {
           messages.push({
@@ -1307,19 +1279,30 @@ export async function runAgentLoop(
       // Execute tool
       // 执行前记录文件是否存在（write/edit 变更卡片的 add/update 判定）
       let existedBefore = false;
+      let originalContent: string | undefined;
       if (
         (toolName === 'write' || toolName === 'edit') &&
         typeof args.file_path === 'string' &&
         args.file_path
       ) {
         try {
-          existedBefore = existsSync(resolve(process.cwd(), expandHome(args.file_path)));
+          const targetPath = resolve(process.cwd(), expandHome(args.file_path));
+          existedBefore = existsSync(targetPath);
+          if (existedBefore) {
+            try { originalContent = readFileSync(targetPath, 'utf8'); } catch { /* Unknown source positions are rendered as ?. */ }
+          }
         } catch { /* 安全保险：判定失败按“不存在”处理，不影响工具执行 */ }
       }
 
       try {
         const sig = computeToolSig(toolName, tc.function.arguments);
-        const result = await executeToolWithTimeout(tool, args, { signal });
+        const result = await executeToolCall(toolName, rawArgs, {
+          permissions: permissionsForToolCall(toolName, args, config, approvedThisCall),
+          cwd: process.cwd(),
+          auditEnabled: config.actionSafety?.auditEnabled,
+          signal,
+          approve: approvedThisCall ? async () => true : undefined,
+        });
         // 坑命中反馈：失败错误匹配已知 trigger → hits+1（§14 反馈闭环）
         recordPitfallHitOnError(result, config, callbacks);
 
@@ -1367,7 +1350,7 @@ export async function runAgentLoop(
           let fileChange: FileChange | undefined;
           if (toolName === 'write' || toolName === 'edit') {
             try {
-              fileChange = buildFileChange(toolName, args, existedBefore) ?? undefined;
+              fileChange = buildFileChange(toolName, args, existedBefore, originalContent) ?? undefined;
             } catch { /* 安全保险：卡片构建失败 → 无卡片 */ }
           }
           callbacks.onToolDone(tc.id, toolName, doneDetail, content, fileChange);

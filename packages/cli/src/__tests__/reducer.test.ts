@@ -270,7 +270,7 @@ describe('reducer TOOL_RESULT（文件变更卡片数据）', () => {
       detail: 'a.txt',
       content: 'write a.txt: done',
       isError: false,
-      fileChange: { path: 'a.txt', kind: 'add', lines: ['x'], truncated: false },
+      fileChange: { path: 'a.txt', kind: 'add', lines: [{ text: 'x', kind: 'add', oldLine: null, newLine: 1 }], truncated: false },
     });
 
     expect(next.history).toHaveLength(1);
@@ -278,7 +278,7 @@ describe('reducer TOOL_RESULT（文件变更卡片数据）', () => {
     expect(next.history[0].fileChange).toEqual({
       path: 'a.txt',
       kind: 'add',
-      lines: ['x'],
+      lines: [{ text: 'x', kind: 'add', oldLine: null, newLine: 1 }],
       truncated: false,
     });
   });
@@ -672,7 +672,7 @@ describe('reducer KEYS_PANEL（/keys 密钥面板）', () => {
 describe('reducer CONFIG_PANEL（/config 交互面板）', () => {
   const rows: ConfigRow[] = [
     { key: 'agent.maxSteps', kind: 'number', display: '80', raw: '80', source: 'default', description: 'Agent loop max steps', secret: false },
-    { key: 'costGuardrails.enabled', kind: 'boolean', display: 'true', raw: 'true', source: 'default', description: 'Cost guardrails master switch', secret: false },
+    { key: 'balanceCheck.enabled', kind: 'boolean', display: 'true', raw: 'true', source: 'default', description: 'Check DeepSeek account balance at startup (/user/balance)', secret: false },
     { key: 'permissions.mode', kind: 'enum', display: 'default', raw: 'default', source: 'default', description: 'Permission mode', allowedValues: ['default', 'acceptEdits', 'bypassPermissions'], secret: false },
   ];
 

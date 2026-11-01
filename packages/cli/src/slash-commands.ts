@@ -19,7 +19,7 @@ export const SLASH_COMMANDS = [
   '/sessions',
   '/plan',
   '/agents', '/a',
-  '/cost', '/budget',
+  '/cost',
   '/prices',
   '/update',
   '/context',
@@ -51,7 +51,6 @@ export const SLASH_COMMAND_DESCRIPTIONS: Record<string, string> = {
   '/plan': '计划模式 / 计划落盘',
   '/agents': '子代理分解执行任务',
   '/cost': '查看本会话成本',
-  '/budget': '成本护栏状态',
   '/prices': '查看价格表（/prices check 手动同步）',
   '/update': '立即检查 shenlan CLI 新版本',
   '/context': '上下文构成与压缩阈值',
@@ -74,7 +73,8 @@ const SLASH_COMMAND_SET = new Set<string>(SLASH_COMMANDS);
 /** 输入是否为已注册斜杠命令（按首词匹配，大小写不敏感） */
 export function isSlashCommand(input: string): boolean {
   const first = input.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
-  return SLASH_COMMAND_SET.has(first);
+  // Keep the retired command on the slash-command path so users receive “Unknown” locally.
+  return SLASH_COMMAND_SET.has(first) || first === '/budget';
 }
 
 /**

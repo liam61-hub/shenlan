@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { needsConfirmation, describePermissionMode } from '../permission.js';
+import { needsConfirmation, decidePermission, describePermissionMode } from '../permission.js';
 import type { PermissionConfig } from '../config.js';
 
 describe('needsConfirmation', () => {
@@ -44,11 +44,11 @@ describe('needsConfirmation', () => {
     expect(needsConfirmation('write', cfg)).toBe(true);
   });
 
-  it('memory_save 恒自动允许（独立于权限三态与 deny 列表）', () => {
+  it('memory_save 自动允许，但显式 deny 仍然生效', () => {
     expect(needsConfirmation('memory_save', baseCfg)).toBe(false);
     expect(needsConfirmation('memory_save', { ...baseCfg, mode: 'acceptEdits' })).toBe(false);
     expect(needsConfirmation('memory_save', { ...baseCfg, mode: 'bypassPermissions' })).toBe(false);
-    expect(needsConfirmation('memory_save', { ...baseCfg, deny: ['memory_save'] })).toBe(false);
+    expect(needsConfirmation('memory_save', { ...baseCfg, deny: ['memory_save'] })).toBe(true);
   });
 
   it('MCP 注解控制只读与破坏性审批，未知工具保守确认', () => {
@@ -62,6 +62,30 @@ describe('needsConfirmation', () => {
     expect(needsConfirmation('restore', baseCfg)).toBe(true);
     expect(needsConfirmation('unknown_tool', baseCfg)).toBe(true);
     expect(needsConfirmation('glob', baseCfg)).toBe(false);
+  });
+});
+
+describe('decidePermission', () => {
+  const baseCfg: PermissionConfig = { mode: 'default', allow: [], deny: [] };
+
+  it('returns an explicit three-way decision for the default mode', () => {
+    expect(decidePermission('read', baseCfg)).toBe('allow');
+    expect(decidePermission('write', baseCfg)).toBe('needs_confirmation');
+  });
+
+  it('deny overrides allow, mode, and memory auto-allow', () => {
+    expect(decidePermission('write', {
+      mode: 'bypassPermissions', allow: ['write'], deny: ['write'],
+    })).toBe('deny');
+    expect(decidePermission('memory_save', {
+      ...baseCfg, deny: ['memory_save'],
+    })).toBe('deny');
+  });
+
+  it('keeps destructive external tools in needs_confirmation even when allow-listed', () => {
+    expect(decidePermission('mcp__srv__destroy', {
+      ...baseCfg, allow: ['mcp__srv__destroy'],
+    }, { destructiveHint: true })).toBe('needs_confirmation');
   });
 });
 

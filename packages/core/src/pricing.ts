@@ -316,21 +316,14 @@ export function getPrice(model: string): PriceTable | undefined {
   return getEffectivePrices().find(p => p.model === model);
 }
 
-/** 估算单次调用成本（CNY）。无生效价的模型返回 0 —— 需要区分「真 0」与「不知道」时用 estimateCostDetailed */
+/** 估算单次调用成本（CNY）；无法估算时返回 null，不把未知费用伪装成零。 */
 export function estimateCost(
   model: string,
   promptTokens: number,
   completionTokens: number,
   cacheReadTokens: number = 0,
-): number {
-  const price = getPrice(model);
-  if (!price) return 0;
-
-  return (
-    (promptTokens / 1_000_000) * price.inputPrice +
-    (completionTokens / 1_000_000) * price.outputPrice +
-    (cacheReadTokens / 1_000_000) * price.cacheReadPrice
-  );
+): number | null {
+  return estimateCostDetailed(model, promptTokens, completionTokens, cacheReadTokens).cny;
 }
 
 /** 成本数据来源：price=生效价格表 / estimated=同档回退估算 / unknown=目录外未知模型 */
@@ -338,7 +331,8 @@ export type CostSource = 'price' | 'estimated' | 'unknown';
 
 /** 带来源标记的成本估算结果 */
 export interface CostEstimate {
-  cny: number;
+  /** Unknown price is null; callers must not silently treat it as zero. */
+  cny: number | null;
   source: CostSource;
   /** source='estimated' 时的估算依据模型（供 UI 解释「这个数是怎么来的」） */
   basedOn?: string[];
@@ -391,10 +385,9 @@ export function fallbackPriceFor(model: string): FallbackPrice | undefined {
  * 估算单次调用成本并标记来源。
  * 生效价格表命中 → source='price'（与 estimateCost 完全一致）；
  * 目录内但无生效价 → source='estimated'（同档回退单价，见 fallbackPriceFor）；
- * 目录外未知模型 → source='unknown' 且 cny=0。
+ * 目录外未知模型 → source='unknown' 且 cny=null。
  *
- * 存在的理由：estimateCost 把「无价」和「零成本」混为一谈，导致无价模型
- * 记账恒为 ¥0、成本护栏永不触发（真实花钱但账面不动）。
+ * 费用仅为本地价格表估算；目录外未知模型保持 null，避免显示为免费。
  */
 export function estimateCostDetailed(
   model: string,
@@ -419,7 +412,7 @@ export function estimateCostDetailed(
       basedOn: fb.basedOn,
     };
   }
-  return { cny: 0, source: 'unknown' };
+  return { cny: null, source: 'unknown' };
 }
 
 /** 目录内无生效价的模型（按同档回退估算计费，/prices 显式列出） */
@@ -429,7 +422,8 @@ export function unpricedCatalogModels(): string[] {
 }
 
 /** 格式化金额 */
-export function formatCost(cny: number): string {
+export function formatCost(cny: number | null): string {
+  if (cny === null) return '未知';
   if (cny >= 1) return `¥${cny.toFixed(2)}`;
   if (cny >= 0.01) return `¥${cny.toFixed(4)}`;
   return `¥${cny.toFixed(6)}`;

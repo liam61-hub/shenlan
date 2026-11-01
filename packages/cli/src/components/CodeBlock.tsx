@@ -25,8 +25,8 @@ export function CodeBlock({ language, code }: CodeBlockProps) {
     highlighted = code;
   }
 
-  // highlight.js 返回 HTML，简单转换为终端样式
-  // 这里用简化方案：清除 HTML tags，用 dim 渲染；反转义实体（&quot; 等）
+  // Convert highlight.js markup to readable source. The surrounding assistant
+  // frame already provides context, so code blocks stay unboxed.
   const plain = highlighted
     .replace(/<[^>]+>/g, '')
     .replace(/&quot;/g, '"')
@@ -36,21 +36,13 @@ export function CodeBlock({ language, code }: CodeBlockProps) {
     .replace(/&amp;/g, '&');
 
   const lines = plain.split('\n');
-  const w = Math.min(process.stdout.columns || 80, 100);
 
   return (
     <Box flexDirection="column" marginY={1}>
-      {language ? (
-        <Text dimColor>┌── {language} ──</Text>
-      ) : (
-        <Text dimColor>┌── code ──</Text>
-      )}
+      {language ? <Text dimColor>{language}</Text> : null}
       {lines.map((line, i) => (
-        <Text key={i} dimColor>
-          {'│ ' + line.slice(0, w - 2)}
-        </Text>
+        <Text key={i} dimColor>{line}</Text>
       ))}
-      <Text dimColor>└{'─'.repeat(Math.min(w - 1, 20))}</Text>
     </Box>
   );
 }

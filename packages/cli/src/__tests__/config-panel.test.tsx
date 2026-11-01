@@ -14,7 +14,7 @@ function makeRows(): ConfigRow[] {
   return [
     { key: 'actionSafety.auditEnabled', kind: 'boolean', display: 'true', raw: 'true', source: 'default', description: 'Action-level audit events', secret: false },
     { key: 'agent.maxSteps', kind: 'number', display: '80', raw: '80', source: 'default', description: 'Agent loop max steps', secret: false },
-    { key: 'costGuardrails.enabled', kind: 'boolean', display: 'true', raw: 'true', source: 'default', description: 'Cost guardrails master switch', secret: false },
+    { key: 'balanceCheck.enabled', kind: 'boolean', display: 'true', raw: 'true', source: 'default', description: 'Check DeepSeek account balance at startup (/user/balance)', secret: false },
     { key: 'permissions.mode', kind: 'enum', display: 'default', raw: 'default', source: 'default', description: 'Permission mode', allowedValues: ['default', 'acceptEdits', 'bypassPermissions'], secret: false },
     { key: 'providerKeys.deepseek', kind: 'string', display: 'sk-1****7890', raw: 'sk-1234567890', source: 'global', description: 'API key per provider', secret: true },
   ];

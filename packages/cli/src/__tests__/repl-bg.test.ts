@@ -11,7 +11,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
     ...actual,
     chatStream: vi.fn(),
     chat: vi.fn().mockRejectedValue(new Error('mock: no network')),
-    executeToolWithTimeout: vi.fn(async () => ({ content: 'ok', isError: false })),
+    executeToolCall: vi.fn(async () => ({ status: 'executed', content: 'ok', isError: false })),
     getAvailableTools: vi.fn(() => []),
     getTool: vi.fn(() => ({
       name: 'read',

@@ -4,7 +4,6 @@
 import type { ShenlanConfig } from '@shenlan/core';
 import {
   fallbackPriceFor,
-  formatCost,
   getEffectivePrices,
   loadUserPrices,
   pricesFilePath,
@@ -53,23 +52,10 @@ export function formatPricesReport(config: ShenlanConfig): string {
       const fb = fallbackPriceFor(model);
       lines.push(fb
         ? `    ${model} ~估 ${fb.inputPrice}/${fb.outputPrice}（依据 ${fb.basedOn.join('、')}）`
-        : `    ${model} 无法估算（同档无已定价同伴，记账为 0）`);
+        : `    ${model} 无法估算（/cost 不显示金额）`);
     }
   }
   return lines.join('\n');
-}
-
-/**
- * /cost 与 /budget 的估算说明行：账面成本含多少来自无内置价模型的同档回退估算。
- * 目的是不让用户把「账面 ¥0/偏低」误读成免费 —— 无价 ≠ 不收费。
- */
-export function formatEstimatedNotice(
-  estimatedCostCny: number,
-  estimatedCalls: number,
-  unpricedModels: string[],
-): string {
-  const models = unpricedModels.length > 0 ? `（${unpricedModels.slice(0, 3).join('、')}${unpricedModels.length > 3 ? ' 等' : ''}）` : '';
-  return `其中 ${formatCost(estimatedCostCny)} 为估算：${estimatedCalls} 次调用的模型无内置价${models}，可 /prices check 同步官方价`;
 }
 
 /** 格式化同步结果（/prices check 与启动自动同步共用） */

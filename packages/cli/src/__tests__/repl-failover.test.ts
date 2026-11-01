@@ -14,7 +14,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
     ...actual,
     chatStream: vi.fn(),
     chat: vi.fn().mockRejectedValue(new Error('mock: no network')),
-    executeToolWithTimeout: vi.fn(async () => ({ content: 'ok', isError: false })),
+    executeToolCall: vi.fn(async () => ({ status: 'executed', content: 'ok', isError: false })),
     getAvailableTools: vi.fn(() => []),
     getTool: vi.fn(() => ({
       name: 'read', description: 'read', parameters: {},
@@ -57,6 +57,9 @@ function harness() {
     onToolDone: () => {},
     onToolError: () => {},
     onConfirm: async () => 'allow',
+    onCost: (model, promptTokens, completionTokens) => {
+      events.push({ kind: 'cost', detail: `${model}:${promptTokens}:${completionTokens}` });
+    },
     onComplete: () => { events.push({ kind: 'complete' }); },
     onError: (err: Error) => { events.push({ kind: 'error', detail: err.message }); },
     onNotice: (content: string) => { events.push({ kind: 'notice', detail: content }); },
@@ -133,6 +136,7 @@ describe('LLM 调用故障转移（repl）', () => {
     expect(secondModel).not.toBe(firstModel);
     expect(secondModel).toBe(findFailoverTarget(firstModel, configWith({ deepseek: 'sk-ds', qwen: 'sk-qwen' }, true)));
     expect(events.some(e => e.kind === 'notice' && e.detail?.includes(secondModel))).toBe(true);
+    expect(events.find(e => e.kind === 'cost')?.detail).toBe(`${secondModel}:10:5`);
     expect(events.some(e => e.kind === 'complete')).toBe(true);
     // 审计记录（tmp cwd 的 audit.jsonl）
     const auditPath = join(tmp, '.shenlan', 'audit.jsonl');

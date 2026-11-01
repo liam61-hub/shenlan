@@ -169,31 +169,11 @@ export const CONFIG_KEYS: Record<string, ConfigKeyMeta> = {
     },
     default: 16384,
   },
-  'costGuardrails.enabled': {
-    type: 'boolean',
-    description: { en: 'Cost guardrails master switch', zh: '成本护栏总开关' },
-    default: true,
-  },
-  'costGuardrails.maxCostPerSession': {
-    type: 'number',
-    description: { en: 'Max cost per session (CNY)', zh: '单会话成本上限（¥）' },
-    default: 5,
-  },
-  'costGuardrails.maxCostPerDay': {
-    type: 'number',
-    description: { en: 'Max cost per day (CNY)', zh: '单日成本上限（¥）' },
-    default: 20,
-  },
-  'costGuardrails.currency': {
-    type: 'string',
-    description: { en: 'Currency unit', zh: '货币单位' },
-    default: 'CNY',
-  },
-  'costGuardrails.balanceCheckBeforeStart': {
+  'balanceCheck.enabled': {
     type: 'boolean',
     description: {
-      en: 'Check account balance at startup (/user/balance)',
-      zh: '启动时预检账户余额（/user/balance）',
+      en: 'Check DeepSeek account balance at startup (/user/balance)',
+      zh: '启动时预检 DeepSeek 账户余额（/user/balance）',
     },
     default: true,
   },
@@ -205,7 +185,7 @@ export const CONFIG_KEYS: Record<string, ConfigKeyMeta> = {
     },
     default: true,
   },
-  'costGuardrails.lowBalanceWarnThreshold': {
+  'balanceCheck.lowBalanceWarnThreshold': {
     type: 'number',
     description: {
       en: 'Warn at startup when balance below this (CNY)',
@@ -417,13 +397,6 @@ export const ENV_VARS: EnvVarMeta[] = [
   {
     name: 'SHENLAN_CONFIG_DIR',
     description: { en: 'Global config dir override (default ~/.shenlan; test isolation)', zh: '全局配置目录重定向（默认 ~/.shenlan，测试隔离用）' },
-  },
-  {
-    name: 'SHENLAN_COST_LEDGER',
-    description: {
-      en: 'Cost ledger file override (default ~/.shenlan/cost-ledger.json)',
-      zh: '成本账本文件重定向（默认 ~/.shenlan/cost-ledger.json）',
-    },
   },
   {
     name: 'SHENLAN_DEBUG',

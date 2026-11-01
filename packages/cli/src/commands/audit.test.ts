@@ -26,7 +26,8 @@ describe('audit 命令共享逻辑', () => {
     expect(lines[0]).toContain('shell');
     expect(lines[0]).toContain('high-risk');
     expect(lines[0]).toContain('blocked');
-    expect(lines[0]).toContain('rm -rf x');
+    expect(lines[0]).toContain('"command":"[REDACTED]"');
+    expect(lines[0]).not.toContain('rm -rf x');
   });
 
   it('auditReport 无事件时给出空态说明', () => {

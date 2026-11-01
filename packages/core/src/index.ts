@@ -6,7 +6,7 @@
 export { loadConfig, createDefaultConfigFile, ensureConfigSampleFiles, ensureProjectConfigFiles, DEFAULT_CONFIG, PROVIDER_PRESETS, resolveApiKey, detectProvider, resolveModelProvider, hasProviderKey, hasAnyProviderKey, resolveBaseUrl, detectProviderFromUrl, envVarForProvider, providerEnvVars, normalizeBaseUrl, chatCompletionsUrl, updateConfig, writeConfigFile, readRawConfig, globalConfigPath, projectConfigPath } from './config.js';
 export { MODEL_CATALOG, catalogModel, catalogModelsByProvider, isVisionModelInCatalog, modelSupportsModality, isThinkingModel, getModelMaxOutputTokens, resolveMaxOutputTokens, DEFAULT_THINKING_OUTPUT_FLOOR, defaultCompactModelFor } from './model-catalog.js';
 export type { CatalogModel, CatalogPrice, OutputBudgetOptions } from './model-catalog.js';
-export type { ShenlanConfig, ModelConfig, PermissionConfig, PermissionMode, ProviderKeys, ProviderBaseUrls, ProviderModels, ProviderPreset, AgentConfig, ContextConfig, CostGuardrailsConfig, MemoryConfig, UpdateCheckConfig, TavilyConfig, ActionSafetyConfig, PlanModeConfig, PitfallMemoryConfig, ProviderFailoverConfig, OnboardingConfig, RoutingConfig, RoutingPolicy, ConfigScope } from './config.js';
+export type { ShenlanConfig, ModelConfig, PermissionConfig, PermissionMode, ProviderKeys, ProviderBaseUrls, ProviderModels, ProviderPreset, AgentConfig, ContextConfig, BalanceCheckConfig, MemoryConfig, UpdateCheckConfig, TavilyConfig, ActionSafetyConfig, PlanModeConfig, PitfallMemoryConfig, ProviderFailoverConfig, OnboardingConfig, RoutingConfig, RoutingPolicy, ConfigScope } from './config.js';
 export { CONFIG_KEYS, CONFIG_KEY_PREFIXES, lookupConfigKey, parseConfigValue, getNested, setNested, deleteNested, ENV_VARS, descText } from './config-schema.js';
 export type { ConfigKeyMeta, ConfigKeyPrefixRule, ParseConfigResult, EnvVarMeta, Lang, BilingualText } from './config-schema.js';
 
@@ -19,6 +19,7 @@ export {
   addMessage,
   appendToJsonl,
   flushSession,
+  flushAllSessions,
   syncSessionMessages,
   writeSessionMeta,
   loadSession,
@@ -41,7 +42,8 @@ export {
 } from './compression.js';
 export type { CompressV2Options, CompressV2Result } from './compression.js';
 
-export { needsConfirmation, describePermissionMode } from './permission.js';
+export { needsConfirmation, decidePermission, describePermissionMode } from './permission.js';
+export type { PermissionDecision } from './permission.js';
 
 export { configDir, dataDir, platformId } from './platform.js';
 export { isPathSafe, maskSensitive, isProtectedPath, setSafetyConfig } from './security.js';
@@ -77,8 +79,8 @@ export type { PriceTable, PriceFile, ManualPrice, AutoPrice, LoadedPrices, CostS
 export { syncPrices, qwenModelsUrl, parseDeepSeekPricing } from './prices-sync.js';
 export type { PriceSyncResult, SyncProvider, SyncPricesOptions } from './prices-sync.js';
 
-export { recordUsage, getSessionCost, getDailyCost, resetSessionCost, checkCostGuardrail, waiveSession, waiveDay, isDayWaived, costLedgerPath } from './cost-tracker.js';
-export type { SessionCost, DailyCost, CostGuardrailCheck } from './cost-tracker.js';
+export { recordUsage, getSessionCost, resetSessionCost } from './cost-tracker.js';
+export type { SessionCost, ModelUsage } from './cost-tracker.js';
 
 export { takeSnapshot, undoS, snapshotCount, listSnapshots } from './snapshot.js';
 
@@ -133,6 +135,10 @@ export {
   registerAllTools,
 } from './tools/index.js';
 export type { Tool, ToolResult, JsonSchema } from './tools/index.js';
+export { validateToolArguments } from './tools/schema-validation.js';
+export type { ArgumentValidationResult } from './tools/schema-validation.js';
+export { executeToolCall } from './tools/execute.js';
+export type { ToolExecutionOptions, ToolExecutionResult, ToolApprovalRequest } from './tools/execute.js';
 export {
   executeToolWithTimeout,
   TOOL_TIMEOUTS,
@@ -140,6 +146,7 @@ export {
 } from './tools/timeout.js';
 export type { TimeoutToolResult } from './tools/timeout.js';
 export { runSubTask, setAgentConfig, getAgentConfig } from './tools/agent.js';
+export type { SubTaskResult, SubTaskStatus } from './tools/agent.js';
 export { setActiveModel, getActiveModel } from './tools/web-search.js';
 export { getTodos, clearTodos } from './tools/todo.js';
 export type { TodoItem, TodoStatus } from './tools/todo.js';

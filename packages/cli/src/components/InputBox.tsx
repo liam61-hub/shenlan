@@ -45,10 +45,10 @@ import { approvalLanguage } from '../approval-policy.js';
 import {
   listSessions, listTrash, emptyTrash,
   snapshotCount, undoS,
-  estimateCost, formatCost,
+  formatCost,
   clearTodos, clearPlan, clearBackgroundTasks,
-  getSessionCost, getDailyCost, resetSessionCost, savePlan,
-  checkCostGuardrail, isDayWaived, updateConfig,
+  getSessionCost, resetSessionCost, savePlan,
+  updateConfig,
   describePermissionMode, projectMemoryDir, loadConfig, messageTextOf,
   setSafetyConfig, setAgentConfig,
 } from '@shenlan/core';
@@ -86,7 +86,7 @@ import {
 } from '../security.js';
 import { securityMenu } from './SecurityPanel.js';
 import { UI, langOf } from '../i18n.js';
-import { formatPricesReport, runPricesCheck, formatEstimatedNotice } from '../commands/prices.js';
+import { formatPricesReport, runPricesCheck } from '../commands/prices.js';
 import {
   memoryAutoSave,
   setMemoryAutoSave,
@@ -205,7 +205,7 @@ export function InputBox() {
     switch (name.toLowerCase()) {
       case '/quit': case '/exit': case '/q': doExit(); return true;
       case '/help': case '/h':
-        reply('  /mcp  /skills  /model  /keys  /security  /goal  /memory  /config\n  /permissions  /plan  /agents  /sessions  /cost  /budget  /prices  /update\n  /context  /compact  /undo  /pitfall  /trash  /cleanup  /clear  /stop\n  /help  /quit'); return false;
+        reply('  /mcp  /skills  /model  /keys  /security  /goal  /memory  /config\n  /permissions  /plan  /agents  /sessions  /cost  /prices  /update\n  /context  /compact  /undo  /pitfall  /trash  /cleanup  /clear  /stop\n  /help  /quit'); return false;
       case '/update': {
         reply('  Checking for updates...');
         checkForUpdate(VERSION, { force: true }).then(result => {
@@ -451,15 +451,17 @@ export function InputBox() {
       case '/cost': {
         const c = getSessionCost();
         if (c.calls > 0) {
-          const lines = [
-            `  ${formatTokens(c.promptTokens)} in + ${formatTokens(c.completionTokens)} out · ${c.calls} 次调用`,
-            `  ${formatCost(c.costCny)}`,
-          ];
-          if (c.estimatedCalls > 0) lines.push(`  ${formatEstimatedNotice(c.estimatedCostCny, c.estimatedCalls, c.unpricedModels)}`);
+          const lines = [`  本会话：${formatTokens(c.promptTokens)} 输入 + ${formatTokens(c.completionTokens)} 输出 = ${formatTokens(c.promptTokens + c.completionTokens)} tokens · ${c.calls} 次调用`];
+          for (const item of c.byModel) {
+            const amount = item.estimatedCostCny === null
+              ? '费用未知'
+              : `${item.hasFallbackEstimate ? '本地估算（回退价）' : '本地估算'} ${formatCost(item.estimatedCostCny)}`;
+            lines.push(`  ${item.model}：${formatTokens(item.promptTokens)} 输入 + ${formatTokens(item.completionTokens)} 输出 · ${item.calls} 次 · ${amount}`);
+          }
+          lines.push('  金额为本地价格估算，不代表供应商实际账单。');
           reply(lines.join('\n'));
         } else {
-          const t = state.messages.reduce((s,m) => s+(m.content?.length||0), 0);
-          reply(`  ~${formatTokens(Math.floor(t/4))} tokens, ~${formatCost(estimateCost(model,Math.floor(t/4),500))}`);
+          reply('  本会话尚无 API 返回的 token usage。');
         }
         return false;
       }
@@ -544,40 +546,6 @@ export function InputBox() {
         // 新会话 logo 画在窗口顶部、输入框紧随其下，观感等同刚启动
         resetViewportToTop(termHeight);
         dispatch({ type: 'CLEAR_SESSION' });
-        return false;
-      }
-      case '/budget': {
-        const g = config.costGuardrails ?? { enabled: true, maxCostPerSession: 5, maxCostPerDay: 20, currency: 'CNY' };
-        const c = getSessionCost();
-        const d = getDailyCost();
-        const guard = checkCostGuardrail(g);
-        const pct = (n: number) => `${Math.round(n * 100)}%`;
-        const sessionPct = g.maxCostPerSession > 0 ? c.costCny / g.maxCostPerSession : 0;
-        const dayPct = g.maxCostPerDay > 0 ? d.costCny / g.maxCostPerDay : 0;
-        const levelLabel = guard.blocked ? '已超限' : guard.level === 'warn' ? '接近上限（≥60%）' : '正常';
-        const sessionWaived = c.costCny >= g.maxCostPerSession
-          && !checkCostGuardrail({ ...g, maxCostPerDay: Number.POSITIVE_INFINITY }).blocked;
-        const status = g.enabled
-          ? `  护栏已启用（超限弹窗可选停止/继续/调上限）· ${levelLabel}`
-          : '  护栏未启用（仅展示）';
-        const goalLine = state.goal
-          ? `\n  goal: ${state.goal.status} — ${state.goal.text.slice(0, 60)}`
-          : '';
-        // 含回退估算时说明账面数字的成色（无内置价模型不是免费）
-        const estLine = c.estimatedCalls > 0
-          ? `\n  ${formatEstimatedNotice(c.estimatedCostCny, c.estimatedCalls, c.unpricedModels)}`
-          : '';
-        reply(
-          `${status}\n` +
-          `  本会话已用 ${formatCost(c.costCny)}（${c.calls} 次调用）· 进度 ${pct(Math.min(1, sessionPct))}` +
-          (sessionPct >= 1 ? (sessionWaived ? '（已豁免）' : '（已超限）') : '') + '\n' +
-          `  今日已用 ${formatCost(d.costCny)}（${d.calls} 次调用）· 进度 ${pct(Math.min(1, dayPct))}` +
-          (dayPct >= 1 ? (isDayWaived() ? '（已豁免）' : '（已超限）') : '') + '\n' +
-          `  Max/session: ${formatCost(g.maxCostPerSession)}  Max/day: ${formatCost(g.maxCostPerDay)}` +
-          (isDayWaived() ? '\n  今日已豁免单日上限' : '') +
-          estLine +
-          goalLine,
-        );
         return false;
       }
       case '/prices': {
@@ -1469,7 +1437,7 @@ export function InputBox() {
           clearPasteStore();
           continue;
         }
-        debugLog('Input — user submitted', { input: val, inputLen: val.length });
+        debugLog('Input — user submitted', { inputLen: val.length });
         dispatch({ type: 'SUBMIT_INPUT', input: val });
         commitInput('', 0);
         setHistoryIdx(-1);

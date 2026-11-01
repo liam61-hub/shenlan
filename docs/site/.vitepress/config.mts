@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress';
 export default defineConfig({
   lang: 'zh-CN',
   title: '深蓝',
-  description: '运行在本地终端上的开源 Agent 工作台',
+  description: '运行在本地终端上的私有 Agent 工作台',
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {
@@ -29,7 +29,7 @@ export default defineConfig({
     },
     search: { provider: 'local' },
     footer: {
-      message: '模型自带 · 会话本地存储 · 能力随使用复利增长',
+      message: '模型自带 · 数据本地 · 能力随使用复利增长',
       copyright: 'Copyright © 2026 shenlan',
     },
   },

@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: 深蓝
-  text: 开源 Agent 工作台
-  tagline: 模型自带，会话存于本机，能力随使用持续复利
+  text: 私有 Agent 工作台
+  tagline: 模型自带，数据不出设备，能力随使用持续复利
   actions:
     - theme: brand
       text: 了解使用方式
@@ -21,12 +21,12 @@ features:
   - title: 智能复利
     details: Auto Memory、坑记忆和 Skill 把反复积累的经验变成下一次任务的能力。
   - title: 安全可控
-    details: 权限确认、动作安全网、成本护栏和可恢复编辑共同约束 Agent 行为。
+    details: 权限确认、动作安全网和可恢复编辑共同约束 Agent 行为。
 ---
 
 ## 当前发布状态
 
-源码以 MIT 许可发布在 [GitHub](https://github.com/liam61-hub/shenlan)，可按[快速开始](/guide/getting-started)从源码运行。公开 npm 安装尚未开放。
+深蓝正在完成公开发布前的产品与安全审计。公开 npm 安装尚未开放；当前页面用于产品预览和文档准备，不提供私有 registry 或私有仓库地址。
 
 ## 远景
 

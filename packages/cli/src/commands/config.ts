@@ -69,7 +69,7 @@ export function sourceLabel(src: 'env' | 'project' | 'global' | 'default', lang:
   }
 }
 
-/** unset 后把被掏空的父对象整块移除（costGuardrails 只剩 {} 时连块删除，保持配置文件整洁） */
+/** unset 后把被掏空的父对象整块移除，保持配置文件整洁 */
 function pruneEmptyParents(obj: Record<string, unknown>, key: string): void {
   const parts = key.split('.');
   for (let depth = parts.length - 1; depth >= 1; depth--) {
@@ -303,7 +303,7 @@ export function configPanelUnset(key: string, scope: ConfigPanelScope, cwd = pro
 
 /**
  * 用 loadConfig 的最新结果整体替换会话内 config（保持同一对象引用）。
- * /config 面板写盘后调用：repl 每轮任务读 config.agent/costGuardrails 等
+ * /config 面板写盘后调用：repl 每轮任务读取当前配置
  * 字段，原地替换即让修改对当前会话即时生效，无需重启。
  */
 export function reloadConfigInPlace(config: ShenlanConfig, cwd = process.cwd()): void {

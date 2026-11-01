@@ -22,7 +22,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
   };
 });
 
-import { chatStream } from '@shenlan/core';
+import { chatStream, getSessionCost, resetSessionCost, registerTool, unregisterTool } from '@shenlan/core';
 import { runTask } from '../run.js';
 import { resetSessionSticky } from '../router.js';
 
@@ -115,5 +115,103 @@ describe('runTask — 循环检测', () => {
 
     expect(result.status).toBe('completed');
     expect(result.error).toBeUndefined();
+  });
+
+  it('headless 无审批器时阻止需要确认的工具', async () => {
+    const toolName = 'headless_confirmation_test';
+    let executions = 0;
+    registerTool({
+      name: toolName,
+      description: 'Test headless confirmation handling.',
+      inputSchema: {
+        type: 'object',
+        properties: { value: { type: 'string' } },
+        required: ['value'],
+      },
+      async execute() {
+        executions++;
+        return { content: 'executed' };
+      },
+    });
+
+    try {
+      installChatScript([
+        () => toolCallMsg('{"value":"x"}', toolName),
+        () => textMsg('完成'),
+      ]);
+      const result = await runTask('执行操作', {
+        ...baseConfig,
+        permissions: { mode: 'default', allow: [], deny: [] },
+        actionSafety: { highRiskActions: 'deny', confirmPhrase: 'yes', protectedPaths: [], auditEnabled: false },
+      });
+
+      expect(result.status).toBe('completed');
+      expect(executions).toBe(0);
+    } finally {
+      unregisterTool(toolName);
+    }
+  });
+
+  it('headless readonly 通过共享权限边界拒绝写工具', async () => {
+    const toolName = 'headless_readonly_test';
+    let executions = 0;
+    registerTool({
+      name: toolName,
+      description: 'Test headless readonly handling.',
+      inputSchema: { type: 'object', properties: {} },
+      async execute() {
+        executions++;
+        return { content: 'executed' };
+      },
+    });
+
+    try {
+      installChatScript([
+        () => toolCallMsg('{}', toolName),
+        () => textMsg('完成'),
+      ]);
+      const result = await runTask('执行只读任务', baseConfig, { readonly: true });
+
+      expect(result.status).toBe('completed');
+      expect(executions).toBe(0);
+    } finally {
+      unregisterTool(toolName);
+    }
+  });
+
+  it('headless records API usage and sends requests without cost reservations', async () => {
+    resetSessionCost();
+    installChatScript([() => textMsg('done')]);
+
+    const result = await runTask('check this', baseConfig);
+
+    expect(result.status).toBe('completed');
+    expect(getSessionCost()).toMatchObject({ calls: 1, promptTokens: 10, completionTokens: 5 });
+  });
+
+  it('headless continues even when local usage estimates are already high', async () => {
+    resetSessionCost();
+    const { recordUsage } = await import('@shenlan/core');
+    recordUsage('deepseek-v4-flash', 1_000_000, 0);
+    installChatScript([() => textMsg('done')]);
+
+    const result = await runTask('continue', baseConfig);
+
+    expect(result.status).toBe('completed');
+    expect(vi.mocked(chatStream)).toHaveBeenCalledOnce();
+  });
+
+  it('headless does not produce a local amount when API usage is absent', async () => {
+    resetSessionCost();
+    vi.mocked(chatStream).mockImplementation((_config, _messages, _tools, callbacks) => {
+      setImmediate(() => callbacks.onComplete(textMsg('done')));
+      return Promise.resolve();
+    });
+
+    const result = await runTask('check this', baseConfig);
+
+    expect(result.status).toBe('completed');
+    expect(result.localEstimateCny).toBeNull();
+    expect(getSessionCost().calls).toBe(0);
   });
 });

@@ -3,7 +3,7 @@
  * shenlan CLI — Ink-based full-screen TUI
  */
 import { render } from 'ink';
-import { loadConfig, loadDotEnvFiles, ensureProjectConfigFiles, registerAllTools, createSession, syncSessionMessages, writeSessionMeta, loadSession, listSessions, connectMcpServers, disconnectAll, isPriceTableExpired, hasAnyProviderKey, setAgentConfig, setSafetyConfig, setTranscribeRunner, whisperTranscribeRunner, checkDeepseekBalance, loadUserPrices, syncPrices, resolveApiKey, resolveModelProvider } from '@shenlan/core';
+import { loadConfig, loadDotEnvFiles, ensureProjectConfigFiles, registerAllTools, createSession, flushAllSessions, syncSessionMessages, writeSessionMeta, loadSession, listSessions, connectMcpServers, disconnectAll, isPriceTableExpired, hasAnyProviderKey, setAgentConfig, setSafetyConfig, setTranscribeRunner, whisperTranscribeRunner, checkDeepseekBalance, loadUserPrices, syncPrices, resolveApiKey, resolveModelProvider } from '@shenlan/core';
 import { getEffectiveModel, initRoutingFromConfig } from './router.js';
 import { formatSyncResult } from './commands/prices.js';
 import { runWizard } from './wizard.js';
@@ -13,10 +13,11 @@ import { setMode } from './mode.js';
 import { installSuspendHandlers } from './signals.js';
 import type { Message, Session } from '@shenlan/core';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { VERSION } from './version.js';
 import { printHelp } from './help.js';
 import { capLine } from './streaming.js';
+import { formatResumeCommand } from './resume-hint.js';
 import {
   checkForUpdate,
   formatUpdateResult,
@@ -56,6 +57,8 @@ function noticeWidth(): number {
 function gracefulExit(code: number): void {
   if (gracefulExited) return;
   gracefulExited = true;
+  // Cancel every pending timer and drain any session buffers before process.exit.
+  try { flushAllSessions(); } catch { /* continue best-effort shutdown */ }
   // 断开全部 MCP 连接，避免 stdio 子进程残留
   try { disconnectAll(); } catch { /* ignore */ }
   let session: Session | undefined;
@@ -84,7 +87,7 @@ function gracefulExit(code: number): void {
     try {
       console.log('');
       console.log(`  会话已保存 (id: ${session.id})`);
-      console.log(`  继续上次会话：shenlan --resume ${session.id}`);
+      console.log(`  继续上次会话：${formatResumeCommand(session.id)}`);
       // 与 shell 提示符之间留空行
       console.log('');
     } catch { /* SIGHUP 等 stdout 失效场景忽略 */ }
@@ -104,7 +107,31 @@ function installGracefulExitHandlers(): void {
   process.on('unhandledRejection', () => gracefulExit(1));
 }
 
+function reportSessionRecovery(session: Session): void {
+  if (!session.recovery) return;
+  console.log(`  ⚠ Session data for ${session.projectPath || 'unknown project'} is incomplete at line ${session.recovery.line}; restored ${session.messages.length} valid messages. Original session file was kept unchanged.\n`);
+}
+
+function sameProjectPath(left: string, right: string): boolean {
+  const normalizedLeft = resolve(left);
+  const normalizedRight = resolve(right);
+  return process.platform === 'win32'
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
+}
+
 async function startInteractive(options: { continueLast?: boolean; resumeId?: string } = {}): Promise<void> {
+  const projectPath = gitRoot(process.cwd()) || resolve(process.cwd());
+  let resumedSession: Session | null = null;
+  if (options.resumeId) {
+    resumedSession = loadSession(options.resumeId);
+    if (!resumedSession) throw new Error(`Cannot resume session "${options.resumeId}": session ID is invalid or the session file does not exist.`);
+    if (!resumedSession.projectPath) throw new Error(`Cannot resume session "${options.resumeId}": project identity is missing from its metadata.`);
+    if (!sameProjectPath(resumedSession.projectPath, projectPath)) {
+      throw new Error(`Cannot resume session "${options.resumeId}": it belongs to another project (${resumedSession.projectPath}).`);
+    }
+  }
+
   // 首次运行懒生成：项目 .shenlan 目录 + 配置样例（全局目录由 loadConfig 生成）
   ensureProjectConfigFiles(process.cwd());
   // .env 加载（项目 cwd/.env + 全局 ~/.shenlan/.env），先于配置合并与引导判断
@@ -144,26 +171,31 @@ async function startInteractive(options: { continueLast?: boolean; resumeId?: st
   }
 
   // Session management
-  const session = createSession();
-  (globalThis as any).__shenlanSession = session;
   let messages: Message[] = [];
 
   if (options.resumeId) {
-    const prev = loadSession(options.resumeId);
-    if (prev) {
-      messages.push(...prev.messages);
-      console.log(`  Resumed session ${options.resumeId} (${prev.messages.length} messages)\n`);
-    }
+    messages.push(...resumedSession!.messages);
+    reportSessionRecovery(resumedSession!);
+    console.log(`  Resumed session ${options.resumeId} for ${projectPath} (${resumedSession!.messages.length} messages)\n`);
   } else if (options.continueLast) {
-    const sessions = listSessions();
+    const sessions = listSessions().filter((candidate) =>
+      candidate.projectPath && sameProjectPath(candidate.projectPath, projectPath),
+    );
     if (sessions.length > 0) {
       const prev = loadSession(sessions[0].id);
       if (prev) {
         messages.push(...prev.messages);
-        console.log(`  Continued session ${sessions[0].id} (${prev.messages.length} messages)\n`);
+        reportSessionRecovery(prev);
+        console.log(`  Continued session ${sessions[0].id} for ${projectPath} (${prev.messages.length} messages)\n`);
       }
+    } else {
+      console.log(`  No saved session found for ${projectPath}; starting a new session.\n`);
     }
   }
+
+  const session = createSession(undefined, projectPath);
+  writeSessionMeta(session);
+  (globalThis as any).__shenlanSession = session;
 
   // 首次引导：无 key、未完成引导且是全新会话 → App 挂载后打开欢迎流程；
   // 恢复会话（--resume/--continue）不打断已有上下文。
@@ -197,7 +229,7 @@ async function startInteractive(options: { continueLast?: boolean; resumeId?: st
   // 触发收紧（#13）：主力模型不在 deepseek 上时不查——余额是 deepseek 路由/故障转移
   // 的信用前置，配了 deepseek key 但主力 openai/qwen 时该检查无决策价值（噪音）。
   if (
-    config.costGuardrails?.balanceCheckBeforeStart !== false
+    config.balanceCheck?.enabled !== false
     && resolveApiKey(config, 'deepseek')
     && resolveModelProvider(config, getEffectiveModel()) === 'deepseek'
   ) {
@@ -211,9 +243,9 @@ async function startInteractive(options: { continueLast?: boolean; resumeId?: st
         notice(`  ⚠ DeepSeek 余额不可用${r.error ? `（${r.error}）` : '（余额不足）'}——请求可能被 402 拒绝，建议充值或 /keys 更换 key`);
       } else if (
         r.balanceCny !== undefined
-        && r.balanceCny < (config.costGuardrails?.lowBalanceWarnThreshold ?? 1)
+        && r.balanceCny < (config.balanceCheck?.lowBalanceWarnThreshold ?? 1)
       ) {
-        notice(`  ⚠ DeepSeek 余额偏低：¥${r.balanceCny.toFixed(2)}（阈值 ¥${config.costGuardrails?.lowBalanceWarnThreshold ?? 1}）`);
+        notice(`  ⚠ DeepSeek 余额偏低：¥${r.balanceCny.toFixed(2)}（阈值 ¥${config.balanceCheck?.lowBalanceWarnThreshold ?? 1}）`);
       }
     }).catch(() => { /* 预检失败不影响启动 */ });
   }
@@ -324,7 +356,7 @@ else if (a[0] === 'run') {
     ensureProjectConfigFiles(process.cwd());
     loadDotEnvFiles(process.cwd());
     const config = loadConfig();
-    // headless 不联网：只加载本地价格（manual/auto 覆盖生效，供 costCny 折算）
+    // headless 不联网：只加载本地价格（manual/auto 覆盖生效，供本地估算与路由使用）
     loadUserPrices();
     // headless 同样恢复持久化路由状态（manual 锁定对 shenlan run 生效）
     initRoutingFromConfig(config);
@@ -352,7 +384,7 @@ else if (a[0] === 'run') {
       status: result.status,
       steps: result.steps,
       cost: result.cost,
-      costCny: result.costCny,
+      localEstimateCny: result.localEstimateCny,
       summary: result.summary,
       ...(result.error ? { error: result.error } : {}),
     }, null, 2));
@@ -368,5 +400,9 @@ else if (a[0] === 'run') {
   const continueLast = a.includes('--continue') || a.includes('-c');
   const resumeIdx = a.indexOf('--resume');
   const resumeId = resumeIdx >= 0 ? a[resumeIdx + 1] : undefined;
+  if (resumeIdx >= 0 && (!resumeId || resumeId.startsWith('-'))) {
+    console.error('Failed: --resume requires a session ID.');
+    process.exit(1);
+  }
   startInteractive({ continueLast, resumeId }).catch(e => { console.error(`Failed: ${e.message}`); process.exit(1); });
 }

@@ -1,8 +1,8 @@
 /**
  * 安全模块 — 路径限制 + 敏感信息脱敏
  */
-import { resolve, relative } from 'node:path';
-import { realpathSync, existsSync } from 'node:fs';
+import { resolve, relative, dirname, basename, isAbsolute, sep } from 'node:path';
+import { realpathSync, lstatSync } from 'node:fs';
 import type { ShenlanConfig } from './config.js';
 import { DEFAULT_CONFIG } from './config.js';
 import { expandHome } from './tools/paths.js';
@@ -27,6 +27,32 @@ function globToRegex(pattern: string): RegExp {
   return new RegExp(`(^|/)${src}($|/)`);
 }
 
+/** Resolve a missing destination through its closest existing ancestor. */
+function realPathWithExistingAncestor(filePath: string): string {
+  let current = resolve(filePath);
+  const missingSegments: string[] = [];
+
+  while (true) {
+    let exists = false;
+    try {
+      lstatSync(current);
+      exists = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      const parent = dirname(current);
+      if (parent === current) throw err;
+      missingSegments.unshift(basename(current));
+      current = parent;
+    }
+    if (exists) return resolve(realpathSync(current), ...missingSegments);
+  }
+}
+
+function isWithinPath(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
 /**
  * 保护路径拦截（write/edit 前置）：命中 actionSafety.protectedPaths 返回 blocked。
  * 路径经 expandHome + resolve 规范化，存在时用 realpath；glob 模式 + 字面子串双匹配。
@@ -36,11 +62,13 @@ export function isProtectedPath(filePath: string): { blocked: boolean; pattern?:
   const patterns = config.actionSafety?.protectedPaths ?? [];
   if (patterns.length === 0) return { blocked: false };
 
-  const raw = resolve(expandHome(filePath));
-  let real = raw;
+  let real: string;
   try {
-    if (existsSync(raw)) real = realpathSync(raw);
-  } catch { /* 不存在的路径按字面路径匹配（写新文件场景） */ }
+    real = realPathWithExistingAncestor(expandHome(filePath));
+  } catch {
+    // If the destination cannot be canonicalized, fail closed when protection is configured.
+    return { blocked: true, pattern: patterns[0] };
+  }
   // 统一正斜杠，跨平台可比较
   const normalized = real.replace(/\\/g, '/');
 
@@ -75,21 +103,19 @@ export function isPathSafe(filePath: string): { safe: boolean; reason?: string }
 
   // symlink 逃逸检测：仅对 cwd 内的路径检查（外部路径由用户显式传入，不拦截）
   const root = getProjectRoot();
-  const rel = relative(root, resolved);
-  const isWithinProject = !rel.startsWith('..') && rel !== '';
+  const isWithinProject = isWithinPath(root, resolved);
 
   if (isWithinProject) {
     try {
-      if (existsSync(resolved)) {
-        const real = realpathSync(resolved);
-        // 比较基准也要 realpath 规范化：macOS 的 /var → /private/var、/tmp → /private/tmp
-        // 等系统级 symlink 会让「字面 root vs 规范 real」比较出假阳性（项目内文件被判逃逸）。
-        const realRel = relative(realProjectRoot(), real);
-        if (realRel.startsWith('..')) {
-          return { safe: false, reason: `Symlink escape detected: "${filePath}" → "${real}"` };
-        }
+      const real = realPathWithExistingAncestor(resolved);
+      // Normalize the root too (for example, macOS /var → /private/var).
+      const canonicalRoot = realProjectRoot();
+      if (!isWithinPath(canonicalRoot, real)) {
+        return { safe: false, reason: `Symlink escape detected: "${filePath}" → "${real}"` };
       }
-    } catch { /* file doesn't exist yet — that's fine for write */ }
+    } catch (err) {
+      return { safe: false, reason: `Unable to resolve path safely: "${filePath}" (${(err as Error).message})` };
+    }
   }
 
   return { safe: true };

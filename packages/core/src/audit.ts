@@ -7,7 +7,7 @@
  */
 import { appendFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { maskSensitive } from './security.js';
+import { sanitizeLogMetadata } from './log-sanitizer.js';
 
 /** 审计事件（落盘结构） */
 export interface AuditEvent {
@@ -30,7 +30,7 @@ export function auditLogPath(cwd: string): string {
 /**
  * 追加一条审计事件。
  * enabled=false 时普通事件跳过；rule='high-risk' 恒记录（§11 不可关闭）。
- * args 传参数对象：内部 JSON 序列化 + maskSensitive 脱敏 + 截断 200 字符。
+ * args 只保留字段级元数据；字符串、数组和对象正文不会落盘。
  */
 export function recordAuditEvent(
   ev: Omit<AuditEvent, 'time' | 'args'> & { args: Record<string, unknown> },
@@ -43,7 +43,7 @@ export function recordAuditEvent(
   const line = JSON.stringify({
     time: Date.now(),
     tool: ev.tool,
-    args: maskSensitive(JSON.stringify(ev.args)).slice(0, 200),
+    args: JSON.stringify(sanitizeLogMetadata(ev.args)).slice(0, 200),
     rule: ev.rule,
     result: ev.result,
   });

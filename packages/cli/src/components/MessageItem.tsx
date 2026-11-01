@@ -56,7 +56,7 @@ export const MessageItem = React.memo(function MessageItem({
             {formatUserBlock(content, termWidth).map((line, i) => (
               <Text key={i}>
                 <Text color={i === 0 ? 'cyan' : undefined}>{line.slice(0, 1)}</Text>
-                <Text bold>{line.slice(1)}</Text>
+                <Text bold>{renderImportantText(line.slice(1))}</Text>
               </Text>
             ))}
           </Box>
@@ -66,7 +66,7 @@ export const MessageItem = React.memo(function MessageItem({
         <AssistantFrame termWidth={termWidth}>{elements}</AssistantFrame>
       )}
       {role === 'tool' && fileChange && (
-        <FileChangeCard fileChange={fileChange} />
+        <FileChangeCard fileChange={fileChange} termWidth={termWidth} />
       )}
       {role === 'tool' && !fileChange && (
         <Box flexDirection="row">
@@ -79,7 +79,7 @@ export const MessageItem = React.memo(function MessageItem({
       {role === 'system' && (
         <Box flexDirection="column">
           {content.split('\n').filter(l => l.trim() !== '').map((line, i) => (
-            <Text key={i} color="yellow">  ℹ {line}</Text>
+            <Text key={i} color="yellow">  ℹ {renderImportantText(line)}</Text>
           ))}
         </Box>
       )}
@@ -87,22 +87,41 @@ export const MessageItem = React.memo(function MessageItem({
   );
 });
 
-/** 文件变更卡片：✏️ Added/Updated <路径> + 预览行（│ 前缀 dim，edit 的 -/+ 行红/绿） */
-function FileChangeCard({ fileChange }: { fileChange: FileChange }) {
-  const label = fileChange.kind === 'add' ? 'Added' : 'Updated';
+/** 文件变更结果：工具动作、写入摘要和紧凑预览。 */
+function FileChangeCard({ fileChange, termWidth }: { fileChange: FileChange; termWidth: number }) {
+  const action = fileChange.kind === 'add' ? 'Write' : 'Update';
+  const previewWidth = Math.min(FILE_CHANGE_PREVIEW_MAX_WIDTH, Math.max(1, Math.floor(termWidth) - 1));
+  const lineCount = fileChange.lines.filter(line => line.kind !== 'truncated' && line.kind !== 'notice').length;
+  const numberWidth = Math.max(1, ...fileChange.lines.flatMap(line =>
+    [line.oldLine, line.newLine].filter((n): n is number => n !== null).map(n => String(n).length),
+  ));
+  const gutterWidth = numberWidth + 5;
   return (
     <Box flexDirection="column">
-      <Text bold>
-        ✏️ {label} {truncateWidth(fileChange.path, FILE_CHANGE_PREVIEW_MAX_WIDTH)}
+      <Text>
+        <Text color="magenta">⏺</Text>{' '}
+        <Text bold>{action}</Text>
+        <Text dimColor>({truncateWidth(fileChange.path, FILE_CHANGE_PREVIEW_MAX_WIDTH)})</Text>
+      </Text>
+      <Text dimColor>
+        {'  ⎿ '}{fileChange.kind === 'add' ? 'Wrote' : 'Updated'} {lineCount} {lineCount === 1 ? 'line' : 'lines'}
       </Text>
       {fileChange.lines.map((line, i) => {
-        const isRemoved = line.startsWith('- ');
-        const isAdded = line.startsWith('+ ');
+        if (line.kind === 'truncated') {
+          return <Box key={i} flexDirection="row"><Text dimColor>{' '.repeat(gutterWidth + 6)}{truncateWidth(line.text, Math.max(1, previewWidth - gutterWidth - 2))}</Text></Box>;
+        }
+        if (line.kind === 'notice') {
+          return <Box key={i} flexDirection="row"><Text dimColor>    {truncateWidth(line.text, Math.max(1, previewWidth - 4))}</Text></Box>;
+        }
+        const lineNumber = line.kind === 'remove' ? line.oldLine : line.newLine;
+        const number = lineNumber === null ? '?' : String(lineNumber);
+        const marker = line.kind === 'remove' ? '-' : line.kind === 'add' ? '+' : ' ';
+        const gutter = `    ${number.padStart(numberWidth)} `;
         return (
           <Box key={i} flexDirection="row">
-            <Text dimColor>  │ </Text>
-            <Text color={isRemoved ? 'red' : isAdded ? 'green' : undefined}>
-              {truncateWidth(line, FILE_CHANGE_PREVIEW_MAX_WIDTH)}
+            <Text dimColor>{gutter}</Text>
+            <Text color={line.kind === 'remove' ? 'red' : line.kind === 'add' ? 'green' : undefined}>
+              {marker} {truncateWidth(line.text, Math.max(1, previewWidth - gutterWidth - 2))}
             </Text>
           </Box>
         );
@@ -281,7 +300,7 @@ export function renderMarkdown(md: string): React.ReactNode[] {
       }
       headingNodes.push(
         <Text key={`h-${i}`} bold color={level <= 2 ? 'white' : undefined}>
-          {level <= 2 ? text : '  ' + text}
+          {renderImportantText(level <= 2 ? text : '  ' + text)}
         </Text>
       );
       nodes.push(...headingNodes);
@@ -339,7 +358,7 @@ export function renderMarkdown(md: string): React.ReactNode[] {
       nodes.push(
         <Box key={`bq-${i}`} flexDirection="column">
           {quoteLines.map((q, qi) => (
-            <Text key={qi} dimColor>│ {renderInlineMdPlain(q)}</Text>
+            <Text key={qi} dimColor>│ {renderImportantText(renderInlineMdPlain(q))}</Text>
           ))}
         </Box>
       );
@@ -373,25 +392,52 @@ export function renderMarkdown(md: string): React.ReactNode[] {
 export function renderInlineMd(text: string): React.ReactNode {
   const parts = parseInline(text);
   if (parts.length === 1 && parts[0].type === 'text') {
-    return <Text>{parts[0].text}</Text>;
+    return <Text>{renderImportantText(parts[0].text)}</Text>;
   }
   return (
     <Text>
       {parts.map((part, i) => {
         switch (part.type) {
-          case 'text': return <Text key={i}>{part.text}</Text>;
-          case 'bold': return <Text key={i} bold>{part.text}</Text>;
-          case 'italic': return <Text key={i} italic>{part.text}</Text>;
+          case 'text': return <Text key={i}>{renderImportantText(part.text)}</Text>;
+          case 'bold': return <Text key={i} bold>{renderImportantText(part.text)}</Text>;
+          case 'italic': return <Text key={i} italic>{renderImportantText(part.text)}</Text>;
           case 'code': return <Text key={i} color="cyan">{part.text}</Text>;
           case 'math': return <Text key={i} color="cyan">{part.text}</Text>;
-          case 'link': return <Text key={i} color="blue">{part.text}</Text>;
-          case 'strike': return <Text key={i} strikethrough>{part.text}</Text>;
+          case 'link': return <Text key={i} color="blue">{renderImportantText(part.text)}</Text>;
+          case 'strike': return <Text key={i} strikethrough>{renderImportantText(part.text)}</Text>;
           case 'image': return <Text key={i} dimColor>{part.text}</Text>;
           default: return <Text key={i}>{part.text}</Text>;
         }
       })}
     </Text>
   );
+}
+
+const IMPORTANT_KEYWORDS = /\[(?:✓|✔|x|X)\]|\[→\]|\[\s\]|☑|☐|\b[A-Z]-\d+\b|\b(?:main|master)\b|\b(?:error|failure|failed|warning|caution|success|completed|critical|important)\b|全绿|错误|失败|警告|注意|成功|完成|重要|关键|风险|必须|禁止|\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\b|\bHTTP\/\d(?:\.\d)?\b|\bRFC\s+\d+\b/giu;
+
+function renderImportantText(text: string): React.ReactNode {
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(IMPORTANT_KEYWORDS)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) nodes.push(text.slice(lastIndex, index));
+    const word = match[0];
+    const lower = word.toLowerCase();
+    const pending = word === '[ ]' || word === '☐';
+    const color = /^(?:\[✓\]|\[✔\]|\[x\]|\[X\]|☑)$/.test(word) || /^(?:success|completed|全绿|成功|完成)$/.test(lower)
+      ? 'green'
+      : word === '[→]'
+        ? 'yellow'
+        : /^(?:error|failure|failed)$/.test(lower) || /^(?:错误|失败|禁止)$/.test(word)
+      ? 'red'
+      : /^(?:warning|caution)$/.test(lower) || /^(?:警告|注意|风险|必须)$/.test(word)
+        ? 'yellow'
+        : 'cyan';
+    nodes.push(<Text key={`keyword-${index}`} color={color} dimColor={pending}>{word}</Text>);
+    lastIndex = index + word.length;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes.length > 0 ? nodes : text;
 }
 
 /**

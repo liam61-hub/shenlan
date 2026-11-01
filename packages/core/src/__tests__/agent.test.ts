@@ -21,7 +21,14 @@ vi.mock('../provider.js', async (importOriginal) => {
 });
 
 import { runSubTask, setAgentConfig, getAgentConfig } from '../tools/agent.js';
-import { DEFAULT_CONFIG, resetSessionCost, getSessionCost } from '../index.js';
+import { chatStream } from '../provider.js';
+import {
+  DEFAULT_CONFIG,
+  resetSessionCost,
+  getSessionCost,
+  registerTool,
+  unregisterTool,
+} from '../index.js';
 
 describe('agent 工具配置注入', () => {
   it('getAgentConfig 返回 setAgentConfig 注入的配置与模型', () => {
@@ -31,18 +38,16 @@ describe('agent 工具配置注入', () => {
   });
 });
 
-describe('runSubTask usage 记账（§26.3：子任务成本计入同一会话护栏）', () => {
+describe('runSubTask usage tracking', () => {
   beforeEach(() => {
+    vi.mocked(chatStream).mockClear();
     resetSessionCost();
     setAgentConfig({ ...DEFAULT_CONFIG }, 'deepseek-v4-flash');
   });
 
-  it('一次成功往返的 LLM usage 计入会话成本', async () => {
-    const result = await runSubTask('查一下', 'goal-记账', { ...DEFAULT_CONFIG }, 'deepseek-v4-flash', 3);
-    expect(result.success).toBe(true);
-    const cost = getSessionCost();
-    expect(cost.calls).toBe(1);
-    expect(cost.promptTokens).toBe(100);
-    expect(cost.completionTokens).toBe(50);
+  it('records API-reported usage while running a subtask', async () => {
+    const result = await runSubTask('look it up', 'usage tracking', { ...DEFAULT_CONFIG }, 'deepseek-v4-flash', 3);
+    expect(result.status).toBe('completed');
+    expect(getSessionCost()).toMatchObject({ calls: 1, promptTokens: 100, completionTokens: 50 });
   });
 });

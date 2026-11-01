@@ -74,6 +74,20 @@ describe('isProtectedPath — 保护路径拦截（write/edit 前置）', () => 
     expect(isProtectedPath(join(tmp, 'proj', '.env.local')).blocked).toBe(true);
   });
 
+  it('通过指向保护目录的 symlink 阻止尚不存在的新文件', () => {
+    const protectedDir = join(tmp, 'vault');
+    const linkDir = join(tmp, 'project', 'vault-link');
+    mkdirSync(protectedDir, { recursive: true });
+    mkdirSync(join(tmp, 'project'), { recursive: true });
+    symlinkSync(protectedDir, linkDir, process.platform === 'win32' ? 'junction' : 'dir');
+    setSafetyConfig({
+      ...DEFAULT_CONFIG,
+      actionSafety: { ...DEFAULT_CONFIG.actionSafety!, protectedPaths: [protectedDir] },
+    });
+
+    expect(isProtectedPath(join(linkDir, 'new-subdir', 'secret.txt')).blocked).toBe(true);
+  });
+
   it('非保护路径不拦截', () => {
     setSafetyConfig({
       ...DEFAULT_CONFIG,
@@ -144,5 +158,19 @@ describe('isPathSafe — symlink 逃逸判定', () => {
 
   it('不存在的路径视为安全（写新文件场景）', () => {
     expect(isPathSafe(join(project, 'not-yet.md')).safe).toBe(true);
+  });
+
+  it('新文件经项目内 symlink 父目录逃逸时拦截', () => {
+    const outside = join(tmp, 'outside');
+    const link = join(project, 'escape');
+    mkdirSync(outside);
+    symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+    const target = join(link, 'not-created', 'secret.md');
+    const platformPath = process.platform === 'win32' ? target.replace(/\\/g, '/') : target;
+
+    const result = isPathSafe(platformPath);
+
+    expect(result.safe).toBe(false);
+    expect(result.reason).toContain('Symlink escape');
   });
 });

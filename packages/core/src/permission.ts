@@ -20,52 +20,63 @@ const READ_TOOLS = new Set([
   'transcribe_media', 'shell_status', 'todo_write', 'update_plan',
 ]);
 
+export type PermissionDecision = 'allow' | 'deny' | 'needs_confirmation';
+
 /** 写操作工具 */
 
 /**
- * 判断是否需要用户确认
+ * 判断工具调用的权限结果
  *
- * @returns true = 需要确认，false = 自动允许
+ * @returns allow, deny, or needs_confirmation
  */
-export function needsConfirmation(
+export function decidePermission(
   toolName: string,
   config: PermissionConfig,
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean },
-): boolean {
-  // Auto Memory：模型自主保存记忆恒自动允许（对齐 Claude Code，
-  // 不弹窗、独立于权限三态与 allow/deny 列表）
-  if (toolName === 'memory_save') return false;
+): PermissionDecision {
+  // Explicit deny is authoritative and cannot be bypassed by allow lists or mode.
+  if (config.deny.includes(toolName)) return 'deny';
+
+  // Auto Memory is automatically allowed unless explicitly denied above.
+  if (toolName === 'memory_save') return 'allow';
 
   // MCP annotations are advisory, but an unknown external tool must not execute
   // with default permissions without an explicit decision.
-  if (toolName.startsWith('mcp__') && annotations?.destructiveHint) return true;
+  if (toolName.startsWith('mcp__') && annotations?.destructiveHint) return 'needs_confirmation';
 
   // 明确允许
-  if (config.allow.includes(toolName)) return false;
-  // 明确拒绝
-  if (config.deny.includes(toolName)) return true;
+  if (config.allow.includes(toolName)) return 'allow';
 
   const mode: PermissionMode = config.mode;
 
   switch (mode) {
     case 'bypassPermissions':
       // 全部允许，但高风险工具仍需确认
-      return HIGH_RISK_TOOLS.has(toolName);
+      return HIGH_RISK_TOOLS.has(toolName) ? 'needs_confirmation' : 'allow';
 
     case 'acceptEdits':
       // 编辑操作自动允许
-      if (toolName === 'write' || toolName === 'edit') return false;
-      if (READ_TOOLS.has(toolName) || annotations?.readOnlyHint) return false;
+      if (toolName === 'write' || toolName === 'edit') return 'allow';
+      if (READ_TOOLS.has(toolName) || annotations?.readOnlyHint) return 'allow';
       // shell 仍需确认
-      return true;
+      return 'needs_confirmation';
 
     case 'default':
     default:
       // 读操作自动允许，写操作需确认
-      if (READ_TOOLS.has(toolName)) return false;
-      if (annotations?.readOnlyHint) return false;
-      return true;
+      if (READ_TOOLS.has(toolName)) return 'allow';
+      if (annotations?.readOnlyHint) return 'allow';
+      return 'needs_confirmation';
   }
+}
+
+/** Backward-compatible prompt predicate; execution paths will migrate to decidePermission. */
+export function needsConfirmation(
+  toolName: string,
+  config: PermissionConfig,
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean },
+): boolean {
+  return decidePermission(toolName, config, annotations) !== 'allow';
 }
 
 /**

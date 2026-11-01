@@ -34,9 +34,11 @@ describe('isSlashCommand（斜杠命令路由判定）', () => {
     expect(isSlashCommand('/')).toBe(false);
   });
 
-  it('未知斜杠命令不算命令（按普通消息提交）', () => {
+  it('未知斜杠命令按未知命令处理；/budget 已退役但仍在本地给出提示', () => {
     expect(isSlashCommand('/foobar')).toBe(false);
     expect(isSlashCommand('/unknown cmd')).toBe(false);
+    expect(isSlashCommand('/budget')).toBe(true);
+    expect(SLASH_COMMANDS).not.toContain('/budget');
   });
 
   it('SLASH_COMMANDS 为命令名列表（首个词匹配依据）', () => {

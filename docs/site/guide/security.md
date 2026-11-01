@@ -13,6 +13,6 @@
 
 ## 密钥与成本
 
-API Key 可保存在受限权限的本地配置中，也可以只通过环境变量提供。提交安全扫描会拦截常见凭据；成本护栏在调用模型前检查会话和单日预算。
+API Key 可保存在受限权限的本地配置中，也可以只通过环境变量提供。提交安全扫描会拦截常见凭据；`/cost` 展示 API 返回的 token 用量和本地价格估算，估算不会拦截模型请求。
 
-公开 npm 发布前会单独审计 tarball。发现安全漏洞请按 [SECURITY.md](https://github.com/liam61-hub/shenlan/blob/master/SECURITY.md) 私下报告。
+公开发布前还会对 npm tarball 做独立审计，检查运行文件、敏感文件名和不必要的源码暴露。

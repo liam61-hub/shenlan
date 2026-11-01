@@ -37,6 +37,38 @@ function renderToRaw(node: React.ReactElement): string {
 }
 
 describe('renderMarkdown（MessageItem 渲染器）', () => {
+  it('会话文本的重点词按语义着色，流式行沿用相同高亮', () => {
+    const completed = renderToRaw(
+      <MessageItem role="assistant" content="注意：发生错误；操作成功，任务已完成。" />,
+    );
+    expect(completed).toContain('\x1b[33m注意\x1b[39m');
+    expect(completed).toContain('\x1b[31m错误\x1b[39m');
+    expect(completed).toContain('\x1b[32m成功\x1b[39m');
+    expect(completed).toContain('\x1b[32m完成\x1b[39m');
+
+    const streaming = renderToRaw(<StreamingLine text="Important: success" />);
+    expect(streaming).toContain('\x1b[36mImportant\x1b[39m');
+    expect(streaming).toContain('\x1b[32msuccess\x1b[39m');
+  });
+
+  it('任务列表按状态、编号和技术关键词着色', () => {
+    const raw = renderToRaw(
+      <MessageItem
+        role="user"
+        content={'[✓] A-1: 把 client_max_body_size 的 tests/cache.rs 修改归入原提交\n[→] B-0: 修复监听 socket 未设 SO_REUSEADDR（重启必陷 TIME_WAIT）\n[ ] B-1: 在 main 上跑回归（127 全绿）'}
+      />,
+    );
+    expect(raw).toContain('\x1b[32m[✓]\x1b[39m');
+    expect(raw).toContain('\x1b[36mA-1\x1b[39m');
+    expect(raw).toContain('\x1b[36mclient_max_body_size\x1b[39m');
+    expect(raw).toContain('\x1b[36mtests/cache.rs\x1b[39m');
+    expect(raw).toContain('\x1b[33m[→]\x1b[39m');
+    expect(raw).toContain('\x1b[36mSO_REUSEADDR\x1b[39m');
+    expect(raw).toContain('\x1b[36mTIME_WAIT\x1b[39m');
+    expect(raw).toContain('\x1b[2m[ ]\x1b[22m');
+    expect(raw).toContain('\x1b[32m全绿\x1b[39m');
+  });
+
   it('单行 $$...$$ 公式块正常渲染（回归：曾因索引回退导致无限循环）', () => {
     const nodes = renderMarkdown('$$X = \\int_{-\\infty}^{\\infty} x(t) dt$$');
     expect(nodes.length).toBe(1);

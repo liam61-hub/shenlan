@@ -109,7 +109,7 @@ describe('config 写操作（作用域 + 原子写）', () => {
       }
       const sample = JSON.parse(readFileSync(join(g, 'config.sample.json'), 'utf-8'));
       expect(sample.providerKeys).toHaveProperty('deepseek');
-      expect(sample.costGuardrails.maxCostPerSession).toBe(5);
+      expect(sample.balanceCheck.lowBalanceWarnThreshold).toBe(1);
       expect(sample.agent.goalMaxSteps).toBe(300);
     } finally {
       if (realConfigDir === undefined) delete process.env.SHENLAN_CONFIG_DIR;

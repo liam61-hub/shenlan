@@ -1,3 +1,5 @@
+import { diffLines } from 'diff';
+
 /**
  * file-change.ts — 文件变更卡片数据（纯函数，无 React/Ink 依赖，可单测）
  *
@@ -21,10 +23,18 @@ export interface FileChange {
   path: string;
   /** write：执行前文件不存在=add，存在=update；edit 恒为 update */
   kind: 'add' | 'update';
-  /** 预览行（write=新内容各行；edit=`- <old>` + `+ <new>`；末行可能为截断标记） */
-  lines: string[];
+  /** 预览行，截断提示使用 kind=truncated 且不带行号。 */
+  lines: FileChangeLine[];
   /** 内容是否超过行数上限被截断 */
   truncated: boolean;
+}
+
+export interface FileChangeLine {
+  text: string;
+  kind: 'add' | 'remove' | 'plain' | 'truncated' | 'notice';
+  /** null 表示该侧不适用或无法可靠定位。 */
+  oldLine: number | null;
+  newLine: number | null;
 }
 
 /**
@@ -39,16 +49,38 @@ export function buildFileChange(
   toolName: string,
   args: Record<string, unknown>,
   existedBefore: boolean,
+  originalContent?: string,
 ): FileChange | null {
   const filePath = typeof args.file_path === 'string' ? args.file_path : '';
   if (!filePath) return null;
 
   if (toolName === 'write') {
     const content = typeof args.content === 'string' ? args.content : '';
-    const { lines, truncated } = previewLines(content, WRITE_PREVIEW_MAX_LINES);
+    const kind = existedBefore ? 'update' : 'add';
+    const allLines = existedBefore && originalContent === undefined
+      ? [{
+        text: 'Change preview unavailable (original file could not be read)',
+        kind: 'notice' as const, oldLine: null, newLine: null,
+      }]
+      : existedBefore
+        ? diffWriteLines(originalContent!, content)
+        : content.split('\n').map((text, index): FileChangeLine => ({
+        text,
+        kind: 'add',
+        oldLine: null,
+        newLine: index + 1,
+      }));
+    const truncated = allLines.length > WRITE_PREVIEW_MAX_LINES;
+    const lines = allLines.slice(0, WRITE_PREVIEW_MAX_LINES);
+    if (truncated) {
+      lines.push({
+        text: `… (${allLines.length - WRITE_PREVIEW_MAX_LINES} more lines)`,
+        kind: 'truncated', oldLine: null, newLine: null,
+      });
+    }
     return {
       path: filePath,
-      kind: existedBefore ? 'update' : 'add',
+      kind,
       lines,
       truncated,
     };
@@ -57,9 +89,14 @@ export function buildFileChange(
   if (toolName === 'edit') {
     const oldStr = typeof args.old_string === 'string' ? args.old_string : '';
     const newStr = typeof args.new_string === 'string' ? args.new_string : '';
-    const lines: string[] = [
-      ...oldStr.split('\n').map((l) => `- ${l}`),
-      ...newStr.split('\n').map((l) => `+ ${l}`),
+    const startLine = findUniqueLine(originalContent, oldStr);
+    const lines: FileChangeLine[] = [
+      ...oldStr.split('\n').map((text, index): FileChangeLine => ({
+        text, kind: 'remove', oldLine: startLine === null ? null : startLine + index, newLine: null,
+      })),
+      ...newStr.split('\n').map((text, index): FileChangeLine => ({
+        text, kind: 'add', oldLine: null, newLine: startLine === null ? null : startLine + index,
+      })),
     ];
     if (lines.length <= EDIT_PREVIEW_MAX_LINES) {
       return { path: filePath, kind: 'update', lines, truncated: false };
@@ -69,7 +106,7 @@ export function buildFileChange(
       kind: 'update',
       lines: [
         ...lines.slice(0, EDIT_PREVIEW_MAX_LINES),
-        `… (${lines.length - EDIT_PREVIEW_MAX_LINES} more lines)`,
+        { text: `… (${lines.length - EDIT_PREVIEW_MAX_LINES} more lines)`, kind: 'truncated', oldLine: null, newLine: null },
       ],
       truncated: true,
     };
@@ -78,12 +115,33 @@ export function buildFileChange(
   return null;
 }
 
-/** 内容前 maxLines 行 + 截断标记（不超过上限时不加标记） */
-function previewLines(content: string, maxLines: number): { lines: string[]; truncated: boolean } {
-  const all = content.split('\n');
-  if (all.length <= maxLines) return { lines: all, truncated: false };
-  return {
-    lines: [...all.slice(0, maxLines), `… (${all.length - maxLines} more lines)`],
-    truncated: true,
-  };
+/** Return the 1-based source line only when the old text occurs exactly once. */
+function findUniqueLine(originalContent: string | undefined, oldText: string): number | null {
+  if (originalContent === undefined || oldText === '') return null;
+  const first = originalContent.indexOf(oldText);
+  if (first < 0 || originalContent.indexOf(oldText, first + 1) >= 0) return null;
+  let line = 1;
+  for (let i = 0; i < first; i++) if (originalContent[i] === '\n') line++;
+  return line;
+}
+
+function diffWriteLines(oldContent: string, newContent: string): FileChangeLine[] {
+  const lines: FileChangeLine[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+  for (const change of diffLines(oldContent, newContent)) {
+    const values = change.value.split('\n');
+    if (values.at(-1) === '') values.pop();
+    for (const text of values) {
+      if (change.removed) {
+        lines.push({ text, kind: 'remove', oldLine: oldLine++, newLine: null });
+      } else if (change.added) {
+        lines.push({ text, kind: 'add', oldLine: null, newLine: newLine++ });
+      } else {
+        oldLine++;
+        newLine++;
+      }
+    }
+  }
+  return lines;
 }

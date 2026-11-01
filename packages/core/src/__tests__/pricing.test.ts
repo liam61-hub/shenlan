@@ -91,8 +91,8 @@ describe('estimateCost — 内置表折算', () => {
     expect(estimateCost('qwen-plus', 1_000_000, 1_000_000)).toBeCloseTo(2.80, 5);
   });
 
-  it('未知模型为 0，零 token 为 0', () => {
-    expect(estimateCost('unknown', 1000, 1000)).toBe(0);
+  it('未知模型为 null，零 token 为 0', () => {
+    expect(estimateCost('unknown', 1000, 1000)).toBeNull();
     expect(estimateCost('deepseek-v4-flash', 0, 0)).toBe(0);
   });
 });
@@ -318,23 +318,24 @@ describe('estimateCostDetailed — 区分「真 0」与「不知道」', () => {
   it('有价模型 source=price 且与 estimateCost 完全一致', () => {
     const est = estimateCostDetailed('deepseek-v4-flash', 1_000_000, 1_000_000);
     expect(est.source).toBe('price');
-    expect(est.cny).toBeCloseTo(estimateCost('deepseek-v4-flash', 1_000_000, 1_000_000), 10);
+    expect(est.cny).not.toBeNull();
+    expect(est.cny!).toBeCloseTo(estimateCost('deepseek-v4-flash', 1_000_000, 1_000_000)!, 10);
     expect(est.cny).toBeCloseTo(12.0, 5);
     expect(est.basedOn).toBeUndefined();
   });
 
   it('无内置价模型 source=estimated 且成本非零（本 bug 的核心回归）', () => {
-    expect(estimateCost('qwen3.7-max', 1_000_000, 1_000_000)).toBe(0);
+    expect(estimateCost('qwen3.7-max', 1_000_000, 1_000_000)).toBeCloseTo(12.0, 5);
     const est = estimateCostDetailed('qwen3.7-max', 1_000_000, 1_000_000);
     expect(est.source).toBe('estimated');
     expect(est.cny).toBeCloseTo(12.0, 5); // 2.40 + 9.60
     expect(est.basedOn).toEqual(['qwen-max', 'qwen-vl-max']);
   });
 
-  it('目录外模型 source=unknown 且记 0（不编造）', () => {
+  it('目录外模型 source=unknown 且费用为 null（不伪装成零成本）', () => {
     const est = estimateCostDetailed('unknown-model', 1_000_000, 1_000_000);
     expect(est.source).toBe('unknown');
-    expect(est.cny).toBe(0);
+    expect(est.cny).toBeNull();
   });
 
   it('缓存读 token 计入回退估算', () => {

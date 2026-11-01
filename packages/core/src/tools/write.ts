@@ -2,11 +2,12 @@
  * 文件写入工具
  */
 import { registerTool } from './index.js';
-import { writeFile, mkdir, rename } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { takeSnapshot } from '../snapshot.js';
 import { isPathSafe, isProtectedPath } from '../security.js';
 import { expandHome } from './paths.js';
+import { FileConflictError, readFileSnapshot, writeFileAtomically } from '../atomic-file.js';
 
 registerTool({
   name: 'write',
@@ -36,14 +37,15 @@ registerTool({
       if (protect.blocked) {
         return { content: `PROTECTED PATH BLOCKED: "${filePath}" matched protectedPaths pattern "${protect.pattern}"`, isError: true };
       }
+      const original = await readFileSnapshot(filePath);
       takeSnapshot(filePath);
       await mkdir(dirname(filePath), { recursive: true });
-      // 原子写入：临时文件 + rename
-      const tmpPath = filePath + '.tmp.' + Math.random().toString(36).slice(2, 8);
-      await writeFile(tmpPath, content, 'utf-8');
-      await rename(tmpPath, filePath);
+      await writeFileAtomically(filePath, content, original);
       return { content: `Successfully wrote ${content.split('\n').length} lines to ${filePath}` };
     } catch (err) {
+      if (err instanceof FileConflictError) {
+        return { content: `Conflict: ${filePath} changed while it was being written. Re-read it before retrying.`, isError: true };
+      }
       return { content: `Failed to write file: ${(err as Error).message}`, isError: true };
     }
   },

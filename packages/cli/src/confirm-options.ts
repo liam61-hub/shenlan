@@ -26,7 +26,6 @@ export function buildConfirmTitle(kind: ConfirmKind, language: Lang = 'en'): str
       case 'command': return '要运行这条命令吗？';
       case 'plan': return '要实施这个计划吗？';
       case 'delete': return '要删除这条记忆吗？';
-      case 'cost-guardrail': return '成本护栏已触发';
       case 'high-risk': return '⚠️ 高危命令：请输入确认短语';
     }
   }
@@ -42,8 +41,6 @@ export function buildConfirmTitle(kind: ConfirmKind, language: Lang = 'en'): str
       return 'Implement this plan?';
     case 'delete':
       return 'Delete this memory?';
-    case 'cost-guardrail':
-      return 'Cost guardrail triggered';
     case 'high-risk':
       return '⚠️ High-risk command — enter the confirmation phrase';
   }
@@ -63,9 +60,6 @@ export function buildConfirmDetail(kind: ConfirmKind, info: { paths?: string[]; 
     const lines = wrapCommand(info.command || '');
     if (info.pattern) lines.push(capLine(`${language === 'zh-CN' ? '命中规则' : 'matched pattern'}: ${info.pattern}`, DETAIL_MAX_WIDTH));
     return lines;
-  }
-  if (kind === 'cost-guardrail') {
-    return [info.command || (language === 'zh-CN' ? '成本已达上限' : 'Cost limit reached')];
   }
   if (kind === 'external' || kind === 'destructive') return [capLine(info.command || '', DETAIL_MAX_WIDTH)];
   return [];

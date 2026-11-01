@@ -2,10 +2,10 @@
  * 精确字符串替换编辑工具
  */
 import { registerTool } from './index.js';
-import { readFile, writeFile } from 'node:fs/promises';
 import { takeSnapshot } from '../snapshot.js';
 import { isPathSafe, isProtectedPath } from '../security.js';
 import { expandHome } from './paths.js';
+import { FileConflictError, readFileSnapshot, writeFileAtomically } from '../atomic-file.js';
 
 registerTool({
   name: 'edit',
@@ -45,8 +45,10 @@ registerTool({
       if (protect.blocked) {
         return { content: `PROTECTED PATH BLOCKED: "${filePath}" matched protectedPaths pattern "${protect.pattern}"`, isError: true };
       }
+      const original = await readFileSnapshot(filePath);
+      if (!original.exists) throw new Error(`ENOENT: file not found: ${filePath}`);
       takeSnapshot(filePath);
-      let content = await readFile(filePath, 'utf-8');
+      let content = original.content;
 
       if (replaceAll) {
         const count = content.split(oldStr).length - 1;
@@ -54,7 +56,7 @@ registerTool({
           return { content: `"${oldStr.slice(0, 50)}" not found in ${filePath}`, isError: true };
         }
         content = content.replaceAll(oldStr, newStr);
-        await writeFile(filePath, content, 'utf-8');
+        await writeFileAtomically(filePath, content, original);
         return { content: `Replaced ${count} occurrence(s) in ${filePath}` };
       } else {
         const index = content.indexOf(oldStr);
@@ -65,10 +67,13 @@ registerTool({
           return { content: `Multiple matches found for "${oldStr.slice(0, 50)}" — use replace_all: true or make old_string more specific`, isError: true };
         }
         content = content.slice(0, index) + newStr + content.slice(index + oldStr.length);
-        await writeFile(filePath, content, 'utf-8');
+        await writeFileAtomically(filePath, content, original);
         return { content: `Successfully edited ${filePath}` };
       }
     } catch (err) {
+      if (err instanceof FileConflictError) {
+        return { content: `Conflict: ${filePath} changed while it was being edited. Re-read it before retrying.`, isError: true };
+      }
       return { content: `Failed to edit file: ${(err as Error).message}`, isError: true };
     }
   },

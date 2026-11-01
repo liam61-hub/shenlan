@@ -104,8 +104,8 @@ function availableModels(config?: ShenlanConfig): CatalogModel[] {
  * 计算。无生效价的模型走 core 的同档回退估算（fallbackPriceFor），**与有价模型同量纲**。
  *
  * 为什么不直接回退 relativeCost（1–4）：那与价格和（如 deepseek-v4-flash = 3+9 = 12）
- * 量纲不同，无价模型恒得低分，cost-first 会系统性优先选中账面 ¥0 的模型 —— 既选错模型
- * 又让成本护栏失效。回退估算仍无解（目录外模型）时才退回 relativeCost。
+ * 量纲不同，无价模型恒得低分，cost-first 会系统性优先选中价格未知的模型。回退估算
+ * 仍无解（目录外模型）时才退回 relativeCost。这里的价格仅用于模型选择，不代表实际账单。
  */
 function effectiveCost(c: CatalogModel): number {
   const p = getPrice(c.model);

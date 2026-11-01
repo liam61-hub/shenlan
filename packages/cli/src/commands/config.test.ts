@@ -37,7 +37,7 @@ describe('/config 命令', () => {
 
   it('无参展示当前生效配置（含各键与描述，敏感键掩码）', () => {
     const out = configCommand('', join(tmp, 'proj'));
-    expect(out).toContain('costGuardrails.enabled: true');
+    expect(out).toContain('balanceCheck.enabled: true');
     expect(out).toContain('context.autoCompactTokenLimit: 200000');
     expect(out).toContain('tavily.enabled: false');
     expect(out).toContain('default');
@@ -118,8 +118,8 @@ describe('/config 命令', () => {
   });
 
   it('get 显示值与来源（默认）', () => {
-    const out = configCommand('get costGuardrails.maxCostPerSession', join(tmp, 'proj'));
-    expect(out).toContain('costGuardrails.maxCostPerSession: 5');
+    const out = configCommand('get balanceCheck.lowBalanceWarnThreshold', join(tmp, 'proj'));
+    expect(out).toContain('balanceCheck.lowBalanceWarnThreshold: 1');
     expect(out).toContain('default');
   });
 
@@ -145,19 +145,19 @@ describe('/config 命令', () => {
 
   it('set 数字：写项目配置且类型为 number', () => {
     const cwd = join(tmp, 'proj');
-    const out = configCommand('set costGuardrails.maxCostPerSession 10', cwd);
+    const out = configCommand('set balanceCheck.lowBalanceWarnThreshold 10', cwd);
     expect(out).toContain('Project');
-    expect(readRawConfig(projectConfigPath(cwd))?.costGuardrails).toMatchObject({ maxCostPerSession: 10 });
+    expect(readRawConfig(projectConfigPath(cwd))?.balanceCheck).toMatchObject({ lowBalanceWarnThreshold: 10 });
   });
 
   it('set 布尔：false 正确写入', () => {
     const cwd = join(tmp, 'proj');
-    configCommand('set costGuardrails.enabled false', cwd);
-    expect(readRawConfig(projectConfigPath(cwd))?.costGuardrails).toMatchObject({ enabled: false });
+    configCommand('set balanceCheck.enabled false', cwd);
+    expect(readRawConfig(projectConfigPath(cwd))?.balanceCheck).toMatchObject({ enabled: false });
   });
 
   it('set 类型错误：布尔键给非布尔值', () => {
-    const out = configCommand('set costGuardrails.enabled yes', join(tmp, 'proj'));
+    const out = configCommand('set balanceCheck.enabled yes', join(tmp, 'proj'));
     expect(out).toContain('boolean');
   });
 
@@ -188,15 +188,15 @@ describe('/config 命令', () => {
 
   it('unset 删除项目配置键（恢复默认）', () => {
     const cwd = join(tmp, 'proj');
-    configCommand('set costGuardrails.maxCostPerSession 10', cwd);
-    const out = configCommand('unset costGuardrails.maxCostPerSession', cwd);
+    configCommand('set balanceCheck.lowBalanceWarnThreshold 10', cwd);
+    const out = configCommand('unset balanceCheck.lowBalanceWarnThreshold', cwd);
     expect(out).toContain('removed');
-    expect(readRawConfig(projectConfigPath(cwd))?.costGuardrails).toBeUndefined();
-    expect(loadConfig(cwd).costGuardrails?.maxCostPerSession).toBe(5);
+    expect(readRawConfig(projectConfigPath(cwd))?.balanceCheck).toBeUndefined();
+    expect(loadConfig(cwd).balanceCheck?.lowBalanceWarnThreshold).toBe(1);
   });
 
   it('unset 未设置的键提示未设置', () => {
-    const out = configCommand('unset costGuardrails.maxCostPerSession', join(tmp, 'proj'));
+    const out = configCommand('unset balanceCheck.lowBalanceWarnThreshold', join(tmp, 'proj'));
     expect(out).toContain('not set');
   });
 });
@@ -228,7 +228,7 @@ describe('buildConfigRows / configPanelSet / configPanelUnset / reloadConfigInPl
     const rows = buildConfigRows(loadConfig(cwd), cwd);
     const byKey = new Map(rows.map((r) => [r.key, r]));
     expect(rows.length).toBeGreaterThan(30);
-    expect(byKey.get('costGuardrails.enabled')?.kind).toBe('boolean');
+    expect(byKey.get('balanceCheck.enabled')?.kind).toBe('boolean');
     expect(byKey.get('permissions.mode')?.kind).toBe('enum');
     expect(byKey.get('permissions.mode')?.allowedValues).toEqual(['default', 'acceptEdits', 'bypassPermissions']);
     expect(byKey.get('agent.maxSteps')?.kind).toBe('number');
@@ -248,16 +248,16 @@ describe('buildConfigRows / configPanelSet / configPanelUnset / reloadConfigInPl
     const bad = configPanelSet('agent.maxSteps', 'abc', 'project', cwd);
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.error).toContain('number');
-    expect(configPanelSet('costGuardrails.enabled', 'false', 'global', cwd).ok).toBe(true);
-    expect(readRawConfig(globalConfigPath())?.costGuardrails).toMatchObject({ enabled: false });
+    expect(configPanelSet('balanceCheck.enabled', 'false', 'global', cwd).ok).toBe(true);
+    expect(readRawConfig(globalConfigPath())?.balanceCheck).toMatchObject({ enabled: false });
   });
 
   it('configPanelUnset 删除键并 prune 空父对象；未设置返回 null', () => {
     const cwd = join(tmp, 'proj');
-    configPanelSet('costGuardrails.maxCostPerSession', '10', 'project', cwd);
-    expect(configPanelUnset('costGuardrails.maxCostPerSession', 'project', cwd)).toBe('costGuardrails.maxCostPerSession');
-    expect(readRawConfig(projectConfigPath(cwd))?.costGuardrails).toBeUndefined();
-    expect(configPanelUnset('costGuardrails.maxCostPerSession', 'project', cwd)).toBeNull();
+    configPanelSet('balanceCheck.lowBalanceWarnThreshold', '10', 'project', cwd);
+    expect(configPanelUnset('balanceCheck.lowBalanceWarnThreshold', 'project', cwd)).toBe('balanceCheck.lowBalanceWarnThreshold');
+    expect(readRawConfig(projectConfigPath(cwd))?.balanceCheck).toBeUndefined();
+    expect(configPanelUnset('balanceCheck.lowBalanceWarnThreshold', 'project', cwd)).toBeNull();
   });
 
   it('reloadConfigInPlace 保持同一引用并刷新为最新盘上值', () => {
@@ -302,8 +302,8 @@ describe('buildConfigRows / configPanelSet / configPanelUnset / reloadConfigInPl
 
 describe('completeConfigKey — /config 键路径 Tab 补全', () => {
   it('前缀多匹配补全到最长公共前缀', () => {
-    expect(completeConfigKey('/config get cost')).toBe('/config get costGuardrails.');
-    expect(completeConfigKey('/config set costGuardrails.max')).toBe('/config set costGuardrails.maxCostPer');
+    expect(completeConfigKey('/config get cost')).toBeNull();
+    expect(completeConfigKey('/config set balanceCheck.low')).toBe('/config set balanceCheck.lowBalanceWarnThreshold');
   });
 
   it('唯一匹配直接补全完整键', () => {
@@ -311,7 +311,7 @@ describe('completeConfigKey — /config 键路径 Tab 补全', () => {
   });
 
   it('公共前缀等于输入时返回 null（避免死循环补全）', () => {
-    expect(completeConfigKey('/config get costGuardrails.maxCostPer')).toBeNull();
+    expect(completeConfigKey('/config get balanceCheck.lowBalanceWarnThreshold')).toBe('/config get balanceCheck.lowBalanceWarnThreshold');
   });
 
   it('无匹配返回 null', () => {

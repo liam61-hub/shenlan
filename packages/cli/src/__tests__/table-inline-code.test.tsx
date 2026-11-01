@@ -79,6 +79,16 @@ describe('表格行内代码反引号（日志复现回归）', () => {
     expect(text).toContain('Cargo.toml');
   });
 
+  it('代码块使用简洁语言标识，不绘制盒状边框', () => {
+    const text = renderToText(
+      <Box flexDirection="column">{renderMarkdown('```ts\nconst value = 1;\n```')}</Box>,
+    );
+    expect(text).toContain('ts');
+    expect(text).toContain('const value = 1;');
+    expect(text).not.toContain('┌');
+    expect(text).not.toContain('└');
+  });
+
   it('流式冻结路径（assistant-line + table 块）不残留反引号', () => {
     let pending: ReturnType<typeof ingestStreamLine>['pendingBlock'] = null;
     const lines: Array<{ text: string; kind?: string }> = [];

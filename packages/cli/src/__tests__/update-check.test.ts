@@ -43,16 +43,6 @@ describe('shouldRunAutomaticUpdateCheck', () => {
 });
 
 describe('checkForUpdate', () => {
-  it('未配置包专用 registry 时提示从源码更新，且不请求公开 npm', async () => {
-    const fetchFn = vi.fn() as unknown as typeof fetch;
-    const result = await checkForUpdate('0.4.90', {
-      npmrcPaths: [], env: {}, fetchFn,
-    });
-    expect(result.status).toBe('unavailable');
-    expect(formatUpdateResult(result)).toContain('GitHub source checkout');
-    expect(fetchFn).not.toHaveBeenCalled();
-  });
-
   it('读取私有 registry 最新版本与 npmrc token，但结果/缓存不泄露 token', async () => {
     const dir = makeTempDir();
     const npmrc = join(dir, '.npmrc');

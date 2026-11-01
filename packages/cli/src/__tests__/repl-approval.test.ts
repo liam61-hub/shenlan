@@ -7,7 +7,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
     ...actual,
     chatStream: vi.fn(),
     chat: vi.fn().mockRejectedValue(new Error('no network')),
-    executeToolWithTimeout: vi.fn(async () => ({ content: 'ok', isError: false })),
+    executeToolCall: vi.fn(async () => ({ status: 'executed', content: 'ok', isError: false })),
     getAvailableTools: vi.fn(() => []),
     getTool: vi.fn((name: string) => ({
       name,
@@ -21,7 +21,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
   };
 });
 
-import { chatStream } from '@shenlan/core';
+import { chatStream, executeToolCall } from '@shenlan/core';
 import { runAgentLoop, clearSessionApprovals } from '../repl.js';
 import type { AgentCallbacks, ConfirmRequestInfo } from '../repl.js';
 import { setMode } from '../mode.js';
@@ -73,6 +73,8 @@ describe('approval in agent loop', () => {
     expect(prompts.every(p => p.language === 'zh-CN')).toBe(true);
     expect(prompts[0]?.commandGrant?.family).toBe(true);
     expect(prompts[1]?.commandGrant?.family).toBe(false);
+    expect(vi.mocked(executeToolCall)).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(executeToolCall).mock.calls.every(([, , options]) => options.permissions.allow.includes('shell'))).toBe(true);
 
     clearSessionApprovals();
     script([toolMessage('shell', { command: 'git status' }, 'd')]);
@@ -88,5 +90,31 @@ describe('approval in agent loop', () => {
     ]);
     const prompts = await run('Please use these tools', () => 'allow_session');
     expect(prompts.map(p => p.kind)).toEqual(['external', 'destructive', 'destructive']);
+  });
+
+  it('passes explicit deny through the shared boundary even in bypass mode', async () => {
+    script([toolMessage('shell', { command: 'git status' }, 'deny')]);
+    const deniedConfig = {
+      ...cfg,
+      permissions: { mode: 'bypassPermissions' as const, allow: [], deny: ['shell'] },
+    };
+    const callbacks: AgentCallbacks = {
+      onToken: () => {}, onToolStart: () => {}, onToolDone: () => {}, onToolError: () => {},
+      onComplete: () => {}, onError: (e) => { throw e; },
+      onConfirm: async () => { throw new Error('explicit deny must not prompt'); },
+    };
+
+    await runAgentLoop('', deniedConfig, [{ role: 'user', content: 'check status' }], callbacks);
+
+    expect(vi.mocked(executeToolCall)).toHaveBeenCalledOnce();
+    expect(vi.mocked(executeToolCall).mock.calls[0]?.[2].permissions.deny).toContain('shell');
+  });
+
+  it('does not call the shared execution boundary when the user refuses confirmation', async () => {
+    script([toolMessage('mcp__srv__write', {}, 'refuse')]);
+    const prompts = await run('Use the external tool', () => 'deny');
+
+    expect(prompts).toHaveLength(1);
+    expect(vi.mocked(executeToolCall)).not.toHaveBeenCalled();
   });
 });

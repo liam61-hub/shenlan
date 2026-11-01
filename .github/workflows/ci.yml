@@ -8,6 +8,8 @@ on:
       - 'packages/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'tsconfig.base.json'
+      - 'vitest.config.ts'
       - 'README.md'
       - 'docs/site/**'
       - 'scripts/release-audit.mjs'
@@ -18,6 +20,8 @@ on:
       - 'packages/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'tsconfig.base.json'
+      - 'vitest.config.ts'
       - 'README.md'
       - 'docs/site/**'
       - 'scripts/release-audit.mjs'
@@ -41,9 +45,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - run: npm ci
+      - run: npm install
       - run: npm run build
       - run: npm test
+      # PTY drivers use pty.fork and run on Unix-like runners only.
+      - run: npm run test:e2e
+        if: runner.os == 'Linux'
       # 站点构建与 OS 无关，只在 Ubuntu 跑（Windows 分钟数按 2× 计费）
       - run: npm run docs:site:build
         if: runner.os == 'Linux'

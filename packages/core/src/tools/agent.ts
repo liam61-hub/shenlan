@@ -4,8 +4,8 @@
  * LLM 可调用此工具将复杂任务拆解为独立子任务并行执行。
  * 每个子 Agent 有完整的工具访问权限，返回摘要结果。
  */
-import { registerTool, getTool, getToolSchemas } from './index.js';
-import { executeToolWithTimeout } from './timeout.js';
+import { registerTool, getToolSchemas } from './index.js';
+import { executeToolCall } from './execute.js';
 import type { ToolResult } from './index.js';
 import type { Message } from '../provider.js';
 import type { ShenlanConfig } from '../config.js';
@@ -18,6 +18,20 @@ import { recordUsage } from '../cost-tracker.js';
 // 模块级配置注入（由 CLI 启动时设置）
 let agentConfig: ShenlanConfig | null = null;
 let agentModel: string = '';
+
+export type SubTaskStatus = 'completed' | 'failed' | 'cancelled' | 'limit_stopped';
+
+export interface SubTaskResult {
+  goal: string;
+  summary: string;
+  status: SubTaskStatus;
+  /** Kept for existing callers; true only when status is completed. */
+  success: boolean;
+}
+
+function subTaskResult(goal: string, summary: string, status: SubTaskStatus): SubTaskResult {
+  return { goal, summary, status, success: status === 'completed' };
+}
 
 /** 子任务最长执行时间：接近主循环 agent 工具 300s 上限，提前带部分结果收尾 */
 const SUBTASK_MAX_DURATION_MS = 240_000;
@@ -42,9 +56,9 @@ export async function runSubTask(
   model: string,
   maxRounds: number = 20,
   signal?: AbortSignal,
-): Promise<{ goal: string; summary: string; success: boolean }> {
+): Promise<SubTaskResult> {
   const startTime = Date.now();
-  debugLog('Sub-agent — started', { goal, task: task.slice(0, 200), maxRounds });
+  debugLog('Sub-agent — started', { goalLen: goal.length, taskLen: task.length, maxRounds });
   const messages: Message[] = [];
   // Dynamic import to avoid circular dependency with context.ts
   const { buildSystemPrompt } = await import('../context.js');
@@ -68,22 +82,19 @@ export async function runSubTask(
     // Check abort signal before each round
     if (signal?.aborted) {
       debugLog('Sub-agent — aborted', { goal, round, elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
-      return { goal, summary: lastContent.slice(0, 500) || 'Aborted', success: false };
+      return subTaskResult(goal, lastContent.slice(0, 500) || 'Aborted', 'cancelled');
     }
 
     // 时间预算：接近主循环超时前主动收尾，返回部分结论而不是被硬超时丢弃
     const elapsedMs = Date.now() - startTime;
     if (elapsedMs > SUBTASK_MAX_DURATION_MS) {
       debugLog('Sub-agent — time budget reached', { goal, round, elapsed: `${(elapsedMs / 1000).toFixed(1)}s`, contentLen: lastContent.length });
-      return {
-        goal,
-        summary: lastContent.slice(0, 500) || '(no partial results)',
-        success: false,
-      };
+      return subTaskResult(goal, lastContent.slice(0, 500) || '(no partial results)', 'limit_stopped');
     }
 
     const resp = await new Promise<{
       msg: Message | null;
+      usage?: { promptTokens: number; completionTokens: number };
       err?: Error;
     }>((resolve) => {
       chatStream(
@@ -98,22 +109,26 @@ export async function runSubTask(
         {
           onToken() { /* silent — sub-agent output stays internal */ },
           onComplete(msg, usage) {
-            // 子任务 LLM 调用真实 usage 计入同一会话成本护栏（§26.3；修复 agent 工具既有缺口）
-            if (usage) recordUsage(model, usage.promptTokens, usage.completionTokens);
-            resolve({ msg });
+            resolve({ msg, usage });
           },
           onError(err) { resolve({ msg: null, err }); },
         },
+        signal,
       ).catch((err) => resolve({ msg: null, err }));
     });
 
+    if (resp.usage && !resp.err) recordUsage(model, resp.usage.promptTokens, resp.usage.completionTokens);
+
+    if (signal?.aborted) {
+      return subTaskResult(goal, lastContent.slice(0, 500) || 'Aborted', 'cancelled');
+    }
+
     if (resp.err || !resp.msg) {
       debugLog('Sub-agent — LLM error', { goal, round, error: resp.err?.message || 'no response', elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
-      return {
-        goal,
-        summary: `Sub-agent failed: ${resp.err?.message || 'no response'}`,
-        success: false,
-      };
+      if (signal?.aborted) {
+        return subTaskResult(goal, lastContent.slice(0, 500) || 'Aborted', 'cancelled');
+      }
+      return subTaskResult(goal, `Sub-agent failed: ${resp.err?.message || 'no response'}`, 'failed');
     }
 
     messages.push(resp.msg);
@@ -122,30 +137,24 @@ export async function runSubTask(
     // No tool calls → sub-agent is done
     if (!resp.msg.tool_calls || resp.msg.tool_calls.length === 0) {
       debugLog('Sub-agent — completed', { goal, round, contentLen: lastContent.length, elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
-      return { goal, summary: lastContent.slice(0, 500), success: true };
+      return subTaskResult(goal, lastContent.slice(0, 500), 'completed');
     }
 
     // Execute tool calls
     for (const tc of resp.msg.tool_calls) {
       // Check abort signal before each tool execution
       if (signal?.aborted) {
-        return { goal, summary: lastContent.slice(0, 500) || 'Aborted', success: false };
+        return subTaskResult(goal, lastContent.slice(0, 500) || 'Aborted', 'cancelled');
       }
 
-      const tool = getTool(tc.function.name);
-      if (!tool) {
-        messages.push({
-          role: 'tool',
-          content: `Unknown tool: ${tc.function.name}`,
-          tool_call_id: tc.id,
-          name: tc.function.name,
-        });
-        continue;
-      }
       try {
-        const args = JSON.parse(tc.function.arguments || '{}');
-        // 超时保护：超时后 abort 合并信号，真正停止底层工具（shell 杀进程等）
-        const result = await executeToolWithTimeout(tool, args, { signal });
+        const args: unknown = JSON.parse(tc.function.arguments || '{}');
+        const result = await executeToolCall(tc.function.name, args, {
+          permissions: config.permissions,
+          cwd: process.cwd(),
+          auditEnabled: config.actionSafety?.auditEnabled,
+          signal,
+        });
         // 视觉子模型 + 工具携带图片 → 展开 image_url 内容块（非视觉静默丢弃）
         // 视觉判定先按模型名（qwen-vl 家族）；目录单一事实源落地后换 catalog 判定
         messages.push(...toolResultToMessages({
@@ -163,11 +172,19 @@ export async function runSubTask(
           name: tc.function.name,
         });
       }
+
+      if (signal?.aborted) {
+        return subTaskResult(goal, lastContent.slice(0, 500) || 'Aborted', 'cancelled');
+      }
     }
   }
 
+  if (signal?.aborted) {
+    return subTaskResult(goal, lastContent.slice(0, 500) || 'Aborted', 'cancelled');
+  }
+
   debugLog('Sub-agent — max rounds reached', { goal, round: maxRounds, contentLen: lastContent.length, elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
-  return { goal, summary: lastContent.slice(0, 500), success: true };
+  return subTaskResult(goal, lastContent.slice(0, 500) || '(no final response)', 'limit_stopped');
 }
 
 // 注册 agent 工具

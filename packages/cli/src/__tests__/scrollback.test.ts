@@ -292,11 +292,12 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
     unmount();
 
     const bytes = Buffer.concat(chunks).toString('utf8');
-    expect(bytes).not.toContain('# 大标题');
-    expect(bytes).toContain('大标题');
-    expect(bytes).toContain('1. 第一步');
-    expect(bytes).toContain('☑ 已完成');
-    expect(bytes).toContain('☐ 待办');
+    const visible = bytes.replace(/\x1b\[[0-9;]*m/g, '');
+    expect(visible).not.toContain('# 大标题');
+    expect(visible).toContain('大标题');
+    expect(visible).toContain('1. 第一步');
+    expect(visible).toContain('☑ 已完成');
+    expect(visible).toContain('☐ 待办');
   });
 
   it('工具结果冻结为紧凑单行：成功摘要与错误行各一次，无整屏清屏', () => {
@@ -382,7 +383,10 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
           fileChange: {
             path: 'hello.txt',
             kind: 'add',
-            lines: ['#!/bin/sh', 'echo hi'],
+            lines: [
+              { text: '#!/bin/sh', kind: 'add', oldLine: null, newLine: 1 },
+              { text: 'echo hi', kind: 'add', oldLine: null, newLine: 2 },
+            ],
             truncated: false,
           },
         },
@@ -393,7 +397,10 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
           fileChange: {
             path: 'src/main.ts',
             kind: 'update',
-            lines: ['- old line', '+ new line'],
+            lines: [
+              { text: 'old line', kind: 'remove', oldLine: 7, newLine: null },
+              { text: 'new line', kind: 'add', oldLine: null, newLine: 7 },
+            ],
             truncated: false,
           },
         },
@@ -407,13 +414,14 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
 
     const bytes = Buffer.concat(chunks).toString('utf8');
     expect(bytes).not.toContain(CLEAR_TERMINAL);
+    const plain = bytes.replace(/\x1b\[[0-9;]*m/g, '');
     // 卡片首行与预览行各恰好一次（静态区持久，不重绘）
-    expect(countOccurrences(bytes, '✏️ Added hello.txt')).toBe(1);
-    expect(countOccurrences(bytes, '✏️ Updated src/main.ts')).toBe(1);
-    expect(countOccurrences(bytes, '#!/bin/sh')).toBe(1);
-    expect(countOccurrences(bytes, 'echo hi')).toBe(1);
-    expect(countOccurrences(bytes, '- old line')).toBe(1);
-    expect(countOccurrences(bytes, '+ new line')).toBe(1);
+    expect(countOccurrences(plain, 'Write(hello.txt)')).toBe(1);
+    expect(countOccurrences(plain, 'Update(src/main.ts)')).toBe(1);
+    expect(countOccurrences(plain, '#!/bin/sh')).toBe(1);
+    expect(countOccurrences(plain, 'echo hi')).toBe(1);
+    expect(countOccurrences(plain, '- old line')).toBe(1);
+    expect(countOccurrences(plain, '+ new line')).toBe(1);
     // 卡片路径替代单行摘要（write/edit 不再出现 "write hello.txt: done" 摘要行）
     expect(bytes).not.toContain('↳ write hello.txt: done');
     expect(bytes).not.toContain('↳ edit main.ts: done');
@@ -1114,46 +1122,7 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
     expect(bytes).not.toContain('─');
   });
 
-  it('成本护栏确认弹窗：kind=cost-guardrail 渲染自定义页脚与反馈提示，无整屏清屏', () => {
-    const stdout = makeTtyStream('stdout');
-    const stdin = makeTtyStream('stdin');
-    const chunks: Buffer[] = [];
-    stdout.on('data', (c: Buffer) => chunks.push(Buffer.from(c)));
-
-    const state = baseState({
-      phase: 'confirming',
-      confirmPrompt: {
-        kind: 'cost-guardrail',
-        title: '成本护栏已触发（本会话上限）',
-        detail: ['本会话成本 ¥6.0 已达上限 ¥5'],
-        toolName: 'cost-guardrail',
-        description: '成本护栏已触发',
-        options: [
-          { label: '停止任务（默认）', key: '1', value: 'stop' },
-          { label: '本次继续（仅本会话）', key: '2', value: 'continue' },
-          { label: '调高本会话上限（输入新值）', key: '3', value: 'feedback' },
-        ],
-        selected: 0,
-        feedbackMode: false,
-        feedbackText: '',
-        feedbackLabel: '输入新的本会话上限（CNY，如 10）：',
-        footerHint: '↑/↓ 选择 · Enter 确认 · Esc 调高上限 · Ctrl+C 终止',
-      },
-    });
-
-    const { unmount } = render(tree(state), {
-      stdout, stdin, patchConsole: false, exitOnCtrlC: false, interactive: true,
-    });
-    unmount();
-
-    const bytes = Buffer.concat(chunks).toString('utf8');
-    expect(bytes).not.toContain(CLEAR_TERMINAL);
-    expect(bytes).toContain('成本护栏已触发');
-    expect(bytes).toContain('调高本会话上限');
-    expect(bytes).toContain('Esc 调高上限');
-  });
-
-  it('24 行终端：/keys、/security 与成本弹窗动态帧 ≤ rows-1，无整屏清屏', () => {
+  it('24 行终端：/keys 与 /security 动态帧 ≤ rows-1，无整屏清屏', () => {
     const runCase = (state: AppState, expectText: string) => {
       const stdout = makeTtyStream('stdout');
       const stdin = makeTtyStream('stdin');
@@ -1200,24 +1169,6 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
       },
     }), 'Security');
 
-    runCase(baseState({
-      phase: 'confirming',
-      confirmPrompt: {
-        kind: 'cost-guardrail',
-        title: '成本护栏已触发（单日上限）',
-        detail: ['今日成本 ¥24.0 已达上限 ¥20'],
-        toolName: 'cost-guardrail',
-        description: '成本护栏已触发',
-        options: [
-          { label: '停止任务（默认）', key: '1', value: 'stop' },
-          { label: '今日豁免并继续', key: '2', value: 'continue' },
-          { label: '调高单日上限（输入新值）', key: '3', value: 'feedback' },
-        ],
-        selected: 0,
-        feedbackMode: false,
-        feedbackText: '',
-      },
-    }), '成本护栏已触发');
 
     runCase(baseState({
       phase: 'confirming',

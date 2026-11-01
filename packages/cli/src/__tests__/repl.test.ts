@@ -11,7 +11,8 @@ vi.mock('@shenlan/core', async (importOriginal) => {
     ...actual,
     chatStream: vi.fn(),
     chat: vi.fn().mockRejectedValue(new Error('mock: no network')),
-    executeToolWithTimeout: vi.fn(async () => ({
+    executeToolCall: vi.fn(async () => ({
+      status: 'executed',
       content: 'y'.repeat(1500),
       isError: false,
     })),
@@ -25,8 +26,8 @@ vi.mock('@shenlan/core', async (importOriginal) => {
   };
 });
 
-import { chatStream, executeToolWithTimeout, recordUsage, resetSessionCost, messageTextOf } from '@shenlan/core';
-import { runAgentLoop, resetCompressionState, getCompressionHistory } from '../repl.js';
+import { chat, chatStream, executeToolCall, getSessionCost, recordUsage, resetSessionCost, messageTextOf } from '@shenlan/core';
+import { compactContext, runAgentLoop, resetCompressionState, getCompressionHistory } from '../repl.js';
 import type { AgentCallbacks } from '../repl.js';
 import { resetSessionSticky } from '../router.js';
 import { resetStop } from '../repl.js';
@@ -253,9 +254,9 @@ describe('runAgentLoop — 循环检测', () => {
     ];
     // 每次执行返回不同内容 → 同签名工具结果变化 = 进展
     let execIdx = 0;
-    vi.mocked(executeToolWithTimeout).mockImplementation(async () => {
+    vi.mocked(executeToolCall).mockImplementation(async () => {
       execIdx++;
-      return { content: `result-${execIdx}`, isError: false, timedOut: false };
+      return { status: 'executed', content: `result-${execIdx}`, isError: false };
     });
     try {
       const { events, callbacks } = harness();
@@ -266,10 +267,10 @@ describe('runAgentLoop — 循环检测', () => {
       expect(events.some(e => e.kind === 'complete')).toBe(true);
       expect(events.filter(e => e.kind === 'error')).toEqual([]);
     } finally {
-      vi.mocked(executeToolWithTimeout).mockImplementation(async () => ({
+      vi.mocked(executeToolCall).mockImplementation(async () => ({
+        status: 'executed',
         content: 'y'.repeat(1500),
         isError: false,
-        timedOut: false,
       }));
     }
   });
@@ -423,7 +424,10 @@ describe('runAgentLoop — 文件变更卡片数据接线', () => {
     expect(doneEvents[0].fileChange).toEqual({
       path: '__card_new_xyz.txt',
       kind: 'add',
-      lines: ['hello', 'world'],
+      lines: [
+        { text: 'hello', kind: 'add', oldLine: null, newLine: 1 },
+        { text: 'world', kind: 'add', oldLine: null, newLine: 2 },
+      ],
       truncated: false,
     });
   });
@@ -450,117 +454,27 @@ describe('runAgentLoop — 文件变更卡片数据接线', () => {
   });
 });
 
-describe('runAgentLoop — 成本护栏', () => {
-  let ledgerDir: string;
-  let configDir: string;
+describe('runAgentLoop — cost estimates do not gate requests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetStop();
     resetSessionSticky();
     resetCompressionState();
     resetSessionCost();
-    // 账本重定向到临时目录，避免污染真实 ~/.shenlan/cost-ledger.json
-    ledgerDir = mkdtempSync(join(tmpdir(), 'shenlan-repl-cost-'));
-    process.env.SHENLAN_COST_LEDGER = join(ledgerDir, 'cost-ledger.json');
-    // 全局配置重定向：调高上限的写回不触碰真实 ~/.shenlan/config.json
-    configDir = mkdtempSync(join(tmpdir(), 'shenlan-repl-config-'));
-    process.env.SHENLAN_CONFIG_DIR = configDir;
-  });
-  afterEach(() => {
-    delete process.env.SHENLAN_COST_LEDGER;
-    delete process.env.SHENLAN_CONFIG_DIR;
-    try { rmSync(ledgerDir, { recursive: true, force: true }); } catch { /* ignore */ }
-    try { rmSync(configDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  it('会话成本已达上限：不再调用 LLM，弹窗询问后按「停止」正常收尾', async () => {
-    // flash 1M input = ¥0.28，先超过 0.01 的单会话上限
+  it('continues to call the model after high usage has accumulated', async () => {
     recordUsage('deepseek-v4-flash', 1_000_000, 0);
+    installChatScript([() => textMsg('request completed')]);
     const messages: Message[] = [
       { role: 'system', content: 'sys' },
-      { role: 'user', content: '任务' },
+      { role: 'user', content: 'task' },
     ];
-    const { events, callbacks } = harness();
-    const confirmInfos: Array<{ kind: string; guardKind?: string }> = [];
-    callbacks.onConfirm = async (info) => {
-      confirmInfos.push({ kind: info.kind, guardKind: info.guardKind });
-      return 'stop';
-    };
-    await runAgentLoop('', {
-      ...baseConfig,
-      costGuardrails: {
-        enabled: true,
-        maxCostPerSession: 0.01,
-        maxCostPerDay: 20,
-        currency: 'CNY',
-      },
-    }, messages, callbacks);
+    const { callbacks } = harness();
+    await runAgentLoop('', baseConfig, messages, callbacks);
 
-    expect(vi.mocked(chatStream)).not.toHaveBeenCalled();
-    expect(confirmInfos).toEqual([{ kind: 'cost-guardrail', guardKind: 'session' }]);
-    expect(events.some(e => e.kind === 'notice' && (e.detail || '').includes('成本护栏'))).toBe(true);
-    expect(events.some(e => e.kind === 'complete')).toBe(true);
-  });
-
-  it('成本弹窗选「继续」：waiveSession 放行并继续调用 LLM', async () => {
-    recordUsage('deepseek-v4-flash', 1_000_000, 0);
-    installChatScript([() => textMsg('继续执行')]);
-    const messages: Message[] = [
-      { role: 'system', content: 'sys' },
-      { role: 'user', content: '任务' },
-    ];
-    const { events, callbacks } = harness();
-    callbacks.onConfirm = async () => 'continue';
-    await runAgentLoop('', {
-      ...baseConfig,
-      costGuardrails: {
-        enabled: true,
-        maxCostPerSession: 0.01,
-        maxCostPerDay: 1000,
-        currency: 'CNY',
-      },
-    }, messages, callbacks);
-
-    // 豁免后调用 LLM 完成（不再被会话上限拦截）
-    expect(vi.mocked(chatStream)).toHaveBeenCalled();
-    expect(events.some(e => e.kind === 'complete')).toBe(true);
-  });
-
-  it('成本弹窗选 abort：终止任务', async () => {
-    recordUsage('deepseek-v4-flash', 1_000_000, 0);
-    const messages: Message[] = [
-      { role: 'system', content: 'sys' },
-      { role: 'user', content: '任务' },
-    ];
-    const { events, callbacks } = harness();
-    callbacks.onConfirm = async () => 'abort';
-    await runAgentLoop('', {
-      ...baseConfig,
-      costGuardrails: { enabled: true, maxCostPerSession: 0.01, maxCostPerDay: 1000, currency: 'CNY' },
-    }, messages, callbacks);
-
-    expect(vi.mocked(chatStream)).not.toHaveBeenCalled();
-    expect(events.some(e => e.kind === 'error' && (e.detail || '').includes('已终止'))).toBe(true);
-  });
-
-  it('成本弹窗输入新上限：校验后写回 config 并继续调用', async () => {
-    recordUsage('deepseek-v4-flash', 1_000_000, 0);
-    installChatScript([() => textMsg('继续')]);
-    const messages: Message[] = [
-      { role: 'system', content: 'sys' },
-      { role: 'user', content: '任务' },
-    ];
-    const { events, callbacks } = harness();
-    callbacks.onConfirm = async () => 'deny_feedback:50';
-    const config: ShenlanConfig = {
-      ...baseConfig,
-      costGuardrails: { enabled: true, maxCostPerSession: 0.01, maxCostPerDay: 1000, currency: 'CNY' },
-    };
-    await runAgentLoop('', config, messages, callbacks);
-
-    expect(config.costGuardrails?.maxCostPerSession).toBe(50);
-    expect(vi.mocked(chatStream)).toHaveBeenCalled();
-    expect(events.some(e => e.kind === 'complete')).toBe(true);
+    expect(vi.mocked(chatStream)).toHaveBeenCalledOnce();
+    expect(getSessionCost().calls).toBe(2);
   });
 });
 
@@ -632,22 +546,68 @@ describe('runAgentLoop — /goal 长任务模式', () => {
     expect(events.some(e => e.kind === 'complete')).toBe(true);
   });
 
-  it('goal 模式成本超限只预警不硬停（LLM 照常调用）', async () => {
-    recordUsage('deepseek-v4-flash', 1_000_000, 0); // ¥0.28 超 0.01 会话上限
-    installChatScript([() => textMsg('目标完成')]);
+  it('goal mode continues after prior usage estimates exceed historical limits', async () => {
+    recordUsage('deepseek-v4-flash', 1_000_000, 0);
+    installChatScript([() => textMsg('goal complete')]);
     const messages: Message[] = [
       { role: 'system', content: 'sys' },
-      { role: 'user', content: '目标' },
+      { role: 'user', content: 'goal' },
     ];
-    const { events, callbacks } = harness();
-    await runAgentLoop('', {
-      ...baseConfig,
-      costGuardrails: { enabled: true, maxCostPerSession: 0.01, maxCostPerDay: 20, currency: 'CNY' },
-    }, messages, callbacks, undefined, goalParam);
+    const { callbacks } = harness();
+    const confirm = vi.fn(async () => 'stop');
+    callbacks.onConfirm = confirm;
+    await runAgentLoop('', baseConfig, messages, callbacks, undefined, goalParam);
 
+    expect(confirm).not.toHaveBeenCalled();
     expect(vi.mocked(chatStream)).toHaveBeenCalled();
-    expect(events.some(e => e.kind === 'notice' && (e.detail || '').includes('goal 模式仅预警'))).toBe(true);
-    expect(events.some(e => e.kind === 'complete')).toBe(true);
+  });
+});
+
+describe('压缩摘要模型预算与 usage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetSessionCost();
+  });
+
+  function longConversation(): Message[] {
+    return Array.from({ length: 44 }, (_, index) => ({
+      role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+      content: `conversation message ${index}`,
+    }));
+  }
+
+  it('does not let prior local estimates block a summary request', async () => {
+    recordUsage('deepseek-v4-flash', 1_000_000, 0);
+    vi.mocked(chat).mockResolvedValue({
+      id: 'summary', model: 'deepseek-v4-flash',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'summary' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+    const result = await compactContext(baseConfig, longConversation());
+    expect(result.method).toBe('llm');
+    expect(vi.mocked(chat)).toHaveBeenCalledOnce();
+  });
+
+  it('将压缩摘要响应 usage 按 compactModel 计入共享账本', async () => {
+    vi.mocked(chat).mockResolvedValue({
+      id: 'summary',
+      model: 'deepseek-v4-flash',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'handoff summary' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 42, completion_tokens: 12, total_tokens: 54 },
+    });
+
+    const result = await compactContext({
+      ...baseConfig,
+      context: {
+        autoCompactTokenLimit: 200_000,
+        keepRecentTurns: 20,
+        toolOutputLimitChars: 8000,
+        compactModel: 'deepseek-v4-flash',
+      },
+    }, longConversation());
+
+    expect(result.method).toBe('llm');
+    expect(getSessionCost()).toMatchObject({ promptTokens: 42, completionTokens: 12, calls: 1 });
   });
 });
 

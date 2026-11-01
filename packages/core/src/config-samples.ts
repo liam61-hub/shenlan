@@ -40,11 +40,9 @@ const SAMPLE_BASE: Record<string, unknown> = {
     compactModel: '',
     maxMemoryTokens: 4096,
   },
-  costGuardrails: {
+  balanceCheck: {
     enabled: true,
-    maxCostPerSession: 5,
-    maxCostPerDay: 20,
-    currency: 'CNY',
+    lowBalanceWarnThreshold: 1,
   },
   memory: {
     autoSave: true,

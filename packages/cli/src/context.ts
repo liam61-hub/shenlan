@@ -66,8 +66,8 @@ export interface BgTaskStatus {
 }
 
 // ===== Confirm prompt =====
-/** 确认弹窗类型：文件编辑 / 命令执行 / 计划实施 / 成本护栏 */
-export type ConfirmKind = 'edit' | 'create' | 'external' | 'destructive' | 'command' | 'plan' | 'delete' | 'cost-guardrail' | 'high-risk';
+/** 确认弹窗类型：文件编辑 / 命令执行 / 计划实施 */
+export type ConfirmKind = 'edit' | 'create' | 'external' | 'destructive' | 'command' | 'plan' | 'delete' | 'high-risk';
 
 export interface ConfirmPrompt {
   kind: ConfirmKind;
@@ -86,7 +86,7 @@ export interface ConfirmPrompt {
   feedbackMode: boolean;
   /** 反馈输入框当前文本 */
   feedbackText: string;
-  /** 反馈输入模式的自定义提示（如成本上限输入）；缺省用默认文案 */
+  /** 反馈输入模式的自定义提示；缺省用默认文案 */
   feedbackLabel?: string;
   /** 弹窗底部快捷键说明；缺省按 kind 默认 */
   footerHint?: string;

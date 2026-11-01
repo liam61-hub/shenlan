@@ -178,7 +178,7 @@ export async function chatStream(
     toolsCount: tools?.length || 0,
     toolNames: tools?.map(t => t.name).join(', ') || '(none)',
     toolChoice: (body.tool_choice as string) || '(not set)',
-    systemPromptPreview: messageTextOf(messages.find(m => m.role === 'system') ?? { content: null }).slice(0, 300),
+    systemPromptChars: messageTextOf(messages.find(m => m.role === 'system') ?? { content: null }).length,
   });
 
   const timeoutSignal = AbortSignal.timeout(300_000);
@@ -236,11 +236,9 @@ export async function chatStream(
           const message = buildAssistantMessage(accumulatedContent, toolCallsByIndex);
           debugLog('API Response [DONE]', {
             contentLen: accumulatedContent.length,
-            contentPreview: accumulatedContent.slice(0, 200),
             toolCallsCount: toolCallsByIndex.size,
             toolNames: Array.from(toolCallsByIndex.values()).map(tc => tc.function.name).join(', '),
             reasoningLen: accumulatedReasoning.length,
-            reasoningPreview: accumulatedReasoning.slice(0, 200),
             finishReason: finishReason ?? '(none)',
             usage: promptTokens > 0
               ? { promptTokens, completionTokens, reasoningIsOutput: accumulatedReasoning.length > 0 && accumulatedContent.length === 0 }
@@ -326,11 +324,9 @@ export async function chatStream(
     const message = buildAssistantMessage(accumulatedContent, toolCallsByIndex);
     debugLog('API Response (stream ended)', {
       contentLen: accumulatedContent.length,
-      contentPreview: accumulatedContent.slice(0, 200),
       toolCallsCount: toolCallsByIndex.size,
       toolNames: Array.from(toolCallsByIndex.values()).map(tc => tc.function.name).join(', '),
       reasoningLen: accumulatedReasoning.length,
-      reasoningPreview: accumulatedReasoning.slice(0, 200),
       finishReason: finishReason ?? '(none)',
       usage: promptTokens > 0
         ? { promptTokens, completionTokens, reasoningIsOutput: accumulatedReasoning.length > 0 && accumulatedContent.length === 0 }

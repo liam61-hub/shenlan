@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path';
 
 export const UPDATE_PACKAGE = '@shenlan/cli';
 export const UPDATE_COMMAND = 'npm install -g @shenlan/cli@latest';
-export const UNCONFIGURED_UPDATE_MESSAGE = 'No npm registry is configured for @shenlan/cli. Use the GitHub source checkout for updates until public npm release.';
+export const DEFAULT_UPDATE_REGISTRY = 'https://packages.aliyun.com/5edd9f55d1d1abe63b55f384/npm/repo-mxhfx/';
 export const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_TIMEOUT_MS = 3_000;
 
@@ -38,10 +38,6 @@ export type UpdateCheckResult =
       status: 'error';
       currentVersion: string;
       error: string;
-    }
-  | {
-      status: 'unavailable';
-      currentVersion: string;
     };
 
 export interface UpdateCheckOptions {
@@ -83,9 +79,13 @@ export async function checkForUpdate(
   const env = options.env ?? process.env;
   const now = options.now ?? Date.now();
   const settings = readNpmSettings(options.npmrcPaths ?? defaultNpmrcPaths(env), env);
-  const configuredRegistry = options.registry ?? settings['@shenlan:registry'];
-  if (!configuredRegistry) return { status: 'unavailable', currentVersion };
-  const registry = normalizeRegistry(configuredRegistry);
+  const registry = normalizeRegistry(
+    options.registry
+      ?? settings['@shenlan:registry']
+      ?? env.npm_config_registry
+      ?? settings.registry
+      ?? DEFAULT_UPDATE_REGISTRY,
+  );
   const cacheFile = join(
     options.cacheDir ?? env.SHENLAN_CONFIG_DIR ?? join(homedir(), '.shenlan'),
     'update-check.json',
@@ -140,7 +140,6 @@ export async function checkForUpdate(
 
 /** 启动提示与 `/update` 共用，不执行自更新。 */
 export function formatUpdateResult(result: UpdateCheckResult): string {
-  if (result.status === 'unavailable') return UNCONFIGURED_UPDATE_MESSAGE;
   if (result.status === 'error') {
     return `Update check failed: ${result.error}`;
   }
