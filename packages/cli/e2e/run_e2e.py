@@ -14,9 +14,11 @@
   - 运行环境允许绑定 localhost 端口（沙箱/审批场景需要授权）
   - 真机脚本需 SHENLAN_E2E_LIVE=1 且有对应 provider key，否则 SKIP
 """
+import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 E2E_DIR = pathlib.Path(__file__).resolve().parent
 PROJECT_ROOT = E2E_DIR.parent.parent.parent
@@ -40,11 +42,17 @@ def main() -> int:
         return 1
 
     results: list[tuple[str, int, str]] = []
+    driver_env = os.environ.copy()
+    if not driver_env.get("SHENLAN_E2E_SCRATCH"):
+        driver_env["SHENLAN_E2E_SCRATCH"] = tempfile.mkdtemp(prefix="shenlan-pty-check-")
+    print("PTY scratch: %s" % driver_env["SHENLAN_E2E_SCRATCH"], flush=True)
     for d in drivers:
         print("\n===== %s =====" % d.name, flush=True)
         try:
-            r = subprocess.run([sys.executable, str(d)], timeout=PER_SCRIPT_TIMEOUT)
+            r = subprocess.run([sys.executable, str(d)], timeout=PER_SCRIPT_TIMEOUT, env=driver_env)
             results.append((d.name, r.returncode, ""))
+            if driver_env.get("GITHUB_ACTIONS") == "true" and r.returncode not in (0, SKIP_CODE):
+                print("::error file=packages/cli/e2e/%s,title=PTY regression failed::%s exited with code %s" % (d.name, d.name, r.returncode), flush=True)
         except subprocess.TimeoutExpired:
             print("TIMEOUT after %ds" % PER_SCRIPT_TIMEOUT, flush=True)
             results.append((d.name, -1, ""))
