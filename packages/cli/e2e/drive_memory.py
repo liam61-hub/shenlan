@@ -24,6 +24,7 @@ import signal
 import socketserver
 import threading
 import time
+from terminal_text import plain_terminal_text
 
 PORT = 9916
 SCRATCH = os.environ.get("SHENLAN_E2E_SCRATCH", "/private/tmp/shenlan-pty-check")
@@ -177,11 +178,11 @@ def drain(timeout):
 def wait_until(marker, timeout=10):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if marker.encode("utf-8") in out:
+        if marker in plain_terminal_text(out):
             return True
         if not drain(0.5):
             return False
-    return marker.encode("utf-8") in out
+    return marker in plain_terminal_text(out)
 
 
 def send(text):
@@ -269,7 +270,7 @@ wait_quiet(60)
 
 # /memory rm：确认弹窗（y 执行删除）→ 主题文件 + 索引删除
 send("/memory rm use-pnpm")
-check("rm 弹出确认", wait_until("Delete this memory?"))
+check("rm 弹出确认", wait_until("要删除这条记忆吗？"))
 os.write(fd, b"y")
 drain(3.0)
 check("rm 删除反馈", "Memory deleted" in out.decode("utf-8", errors="replace"))

@@ -18,6 +18,7 @@ import signal
 import socketserver
 import threading
 import time
+from terminal_text import plain_terminal_text
 
 PORT = 9905
 # scratch 目录可用环境变量覆盖（默认 /private/tmp/shenlan-pty-check）
@@ -154,11 +155,11 @@ def drain(timeout):
 def wait_until(marker, timeout=10):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if marker in out.decode("utf-8", errors="replace"):
+        if marker in plain_terminal_text(out):
             return True
         if not drain(0.5):
             return False
-    return marker in out.decode("utf-8", errors="replace")
+    return marker in plain_terminal_text(out)
 
 
 def send(text):

@@ -6,7 +6,7 @@
  *  2. 字形使用发用的半长竖线 `╷`（U+2577，只占下半格）、腿角字形 `▘▝` 和圆点眼睛 `•`；
  *  3. 配色为原来的村民青（前景 `36m` / 背景 `46m`）。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render } from 'ink';
 import React from 'react';
 import chalk from 'chalk';
@@ -15,6 +15,7 @@ import { StatusBar } from '../components/StatusBar.js';
 import { AppContext } from '../context.js';
 import type { AppContextType } from '../context.js';
 import { baseState, makeTtyStream } from './scrollback-harness.js';
+import { displayWidth } from '../markdown-utils.js';
 
 /** 村民青，必须与 StatusBar 的 LOGO_COLOR 一致 */
 const CYAN_FG = '\x1b[36m';
@@ -35,7 +36,7 @@ const testConfig: ShenlanConfig = {
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
 
-function renderStatusBar(): string {
+function renderStatusBar(termWidth = 120): string {
   const stdout = makeTtyStream('stdout');
   const stdin = makeTtyStream('stdin');
   const chunks: Buffer[] = [];
@@ -44,7 +45,7 @@ function renderStatusBar(): string {
     config: testConfig,
     mode: 'default',
     model: 'deepseek-v4-flash',
-    termWidth: 120,
+    termWidth,
     termHeight: 40,
     state: baseState(),
     dispatch: (() => {}) as unknown as AppContextType['dispatch'],
@@ -108,4 +109,14 @@ describe('StatusBar logo — 紧凑村民头（背景色涂块）', () => {
     expect(raw).toContain('deepseek-v4-flash');
     expect(raw).toContain('NORMAL');
   });
+});
+
+it('keeps long working-directory paths below the terminal width', () => {
+  const cwd = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/' + 'long-directory-name/'.repeat(10));
+  try {
+    const text = stripAnsi(withChalkLevel(3, () => renderStatusBar(60)));
+    expect(text).toContain('SHENLAN');
+    expect(text).toContain('/tmp/');
+    for (const line of text.split('\n')) expect(displayWidth(line)).toBeLessThan(60);
+  } finally { cwd.mockRestore(); }
 });

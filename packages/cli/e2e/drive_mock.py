@@ -6,7 +6,7 @@
 场景（对齐计划 Test Plan）：
   1. 启动 CLI（env 指向本地 mock，HOME/工作目录用 scratch，不碰真实配置）
   2. 提交长任务"权益卡逻辑介绍一下" → mock 连续返回 35 轮工具调用（>30 轮不报错）
-  3. 再提交追问"你好" → 验证会话级模型粘性（第 37 个请求仍应路由 pro）
+  3. Submit a follow-up and verify the first 37 requests retain the initial model.
   4. /quit 退出
 
 输出：
@@ -228,7 +228,9 @@ while time.time() < deadline:
     if len(out) == before:
         break
 
-# Shift+Tab ×2：default → acceptEdits → bypassPermissions
+# Shift+Tab x3: default -> acceptEdits -> plan -> bypassPermissions.
+os.write(fd, b"\x1b[Z")
+time.sleep(0.5)
 os.write(fd, b"\x1b[Z")
 time.sleep(0.5)
 os.write(fd, b"\x1b[Z")
@@ -282,12 +284,13 @@ def expect(cond, label):
 
 # 请求数：35 轮 noop + 3 文本 + 2 次 write 权限阶段 + /compact 等，合计应 ≥ 40
 expect(count >= 40, "请求数 ≥ 40（实际 %d）" % count)
-# 模型粘性：会话内第 1-37 个请求都应路由 pro（/model 切换前）
+# The mock classifier returns general: start with Flash and retain it until /model.
 try:
     with open(LOG) as f:
         models = [line.split("\t")[1].strip() for line in f if "\t" in line]
     expect(len(models) >= 37, "模型日志行数 ≥ 37（实际 %d）" % len(models))
-    expect(all(m == "deepseek-v4-pro" for m in models[:37]), "第 1-37 个请求模型粘性保持 pro")
+    expect(bool(models) and models[0] == "deepseek-v4-flash", "general classification selects Flash")
+    expect(bool(models) and all(m == models[0] for m in models[:37]), "first 37 requests retain the initial model")
 except FileNotFoundError:
     expect(False, "mock-requests.log 存在")
 

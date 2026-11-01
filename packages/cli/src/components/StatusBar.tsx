@@ -100,7 +100,7 @@ function gitBranch(): string {
 }
 
 export function StatusBar({ version }: { version: string }) {
-  const { model, mode } = useContext(AppContext);
+  const { model, mode, termWidth } = useContext(AppContext);
   const cwd = process.cwd();
   const branch = useMemo(() => gitBranch(), []);
 
@@ -134,7 +134,9 @@ export function StatusBar({ version }: { version: string }) {
             <LogoRow index={i} />
           </Box>
           <Text>  </Text>
-          {infoLines[i]}
+          <Box width={Math.max(1, termWidth - 11)} height={1} overflow="hidden">
+            <Text wrap="truncate-end">{infoLines[i]}</Text>
+          </Box>
         </Box>
       ))}
     </Box>

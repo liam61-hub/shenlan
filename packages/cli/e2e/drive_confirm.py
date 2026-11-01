@@ -143,11 +143,11 @@ def drain(timeout):
 def wait_until(marker, timeout=10):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if marker in out.decode("utf-8", errors="replace"):
+        if marker in ansi_re.sub("", out.decode("utf-8", errors="replace")):
             return True
         if not drain(0.5):
             return False
-    return marker in out.decode("utf-8", errors="replace")
+    return marker in ansi_re.sub("", out.decode("utf-8", errors="replace"))
 
 
 def send(text):
@@ -193,8 +193,9 @@ drain(5.0)
 # 1) 弹窗 A：按 y
 send("写一个文件 a")
 check("popup A shown", wait_until("a.txt"))
+check("popup A controls shown", wait_until("Esc 说明原因 · Ctrl+C 终止"))
 lines = nonempty_lines(out)
-esc_idx = max(i for i, l in enumerate(lines) if "Esc 说明原因 · Ctrl+C 终止任务" in l)
+esc_idx = max(i for i, l in enumerate(lines) if "Esc 说明原因 · Ctrl+C 终止" in l)
 check(
     "popup A in-flow + input hidden",
     esc_idx == len(lines) - 1 and not any("NORMAL" in l for l in lines[esc_idx + 1:]),
@@ -213,7 +214,7 @@ check("popup B resolved", wait_until("第二步完成。"))
 send("写一个文件 c")
 check("popup C shown", wait_until("c.txt"))
 os.write(fd, b"\x1b")
-check("feedback mode", wait_until("Tell me what to do differently"))
+check("feedback mode", wait_until("请说明应如何调整："))
 os.write(fd, "换个方式".encode("utf-8"))
 time.sleep(0.3)
 os.write(fd, b"\r")

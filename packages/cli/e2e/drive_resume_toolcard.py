@@ -18,6 +18,8 @@ import signal
 import socketserver
 import threading
 import time
+import uuid
+from terminal_text import plain_terminal_text
 
 PORT = 9911
 # scratch 目录可用环境变量覆盖（默认 /private/tmp/shenlan-pty-check）
@@ -29,7 +31,7 @@ CAPTURE = SCRATCH + "/typescript-resume-toolcard"
 # 从脚本位置推导项目根（packages/cli/e2e → 仓库根）
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 CLI = str(PROJECT_ROOT / "packages" / "cli" / "dist" / "index.js")
-SID = "toolcard"
+SID = str(uuid.uuid4())
 
 os.makedirs(WORK, exist_ok=True)
 os.makedirs(SESSIONS, exist_ok=True)
@@ -45,7 +47,9 @@ with open(os.path.join(WORK, ".shenlan", "config.json"), "w") as f:
 # 旧会话 JSONL：user + assistant + 工具结果（老格式，无 fileChange）
 old_msgs = [
     {"role": "user", "content": "写一个文件并总结"},
-    {"role": "assistant", "content": "我先写入文件。"},
+    {"role": "assistant", "content": "我先写入文件。", "tool_calls": [
+        {"id": "old_c1", "type": "function", "function": {"name": "write", "arguments": json.dumps({"file_path": "a.txt", "content": "old"})}},
+    ]},
     {"role": "tool", "content": "write a.txt: done", "tool_call_id": "old_c1", "name": "write"},
     {"role": "user", "content": "继续"},
     {"role": "assistant", "content": "这是旧会话的最终回答。"},
@@ -53,6 +57,8 @@ old_msgs = [
 with open(os.path.join(SESSIONS, SID + ".jsonl"), "w") as f:
     for m in old_msgs:
         f.write(json.dumps(m, ensure_ascii=False) + "\n")
+with open(os.path.join(SESSIONS, SID + ".meta.json"), "w", encoding="utf-8") as f:
+    json.dump({"id": SID, "projectPath": WORK}, f)
 
 try:
     os.remove(CAPTURE)
@@ -175,6 +181,7 @@ except ChildProcessError:
 server.shutdown()
 
 text = bytes(out).decode("utf-8", errors="replace")
+visible_text = plain_terminal_text(out)
 with open(CAPTURE, "wb") as f:
     f.write(bytes(out))
 
@@ -192,10 +199,11 @@ def expect(cond, label):
         failed.append(label)
 
 
-expect("Resumed session" in text, "resume 横幅显示")
-expect("↳ write a.txt: done" in text, "旧工具行保持单行摘要（↳）")
+expect("Resumed session" in visible_text, "resume 横幅显示")
+expect("↳ write a.txt: done" in visible_text, "旧工具行保持单行摘要（↳）")
 expect("✏️" not in text, "恢复历史不出现文件变更卡片")
-expect("resume 后 mock 回复。" in text, "resume 后正常回复（不崩溃）")
+expect("Write(a.txt)" not in visible_text, "restored tool output has no modern file card")
+expect("resume 后 mock 回复。" in visible_text, "resume 后正常回复（不崩溃）")
 expect("\x1b[2J\x1b[3J\x1b[H" not in text, "无整屏清空序列")
 
 print("failed:", failed)

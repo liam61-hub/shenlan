@@ -43,6 +43,9 @@ def main() -> int:
 
     results: list[tuple[str, int, str]] = []
     driver_env = os.environ.copy()
+    # PTY drivers exercise a real interactive terminal even on a CI host.
+    driver_env["CI"] = "false"
+    driver_env["CONTINUOUS_INTEGRATION"] = "false"
     if not driver_env.get("SHENLAN_E2E_SCRATCH"):
         driver_env["SHENLAN_E2E_SCRATCH"] = tempfile.mkdtemp(prefix="shenlan-pty-check-")
     print("PTY scratch: %s" % driver_env["SHENLAN_E2E_SCRATCH"], flush=True)

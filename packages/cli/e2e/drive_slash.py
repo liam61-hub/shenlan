@@ -24,6 +24,7 @@ import signal
 import socketserver
 import threading
 import time
+from terminal_text import plain_terminal_text
 import re
 
 PORT = 9915
@@ -108,11 +109,11 @@ def drain(timeout):
 def wait_until(marker, timeout=10):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if marker.encode("utf-8") in out:
+        if marker in plain_terminal_text(out):
             return True
         if not drain(0.5):
             return False
-    return marker.encode("utf-8") in out
+    return marker in plain_terminal_text(out)
 
 
 def send(text):

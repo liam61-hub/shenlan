@@ -3,7 +3,7 @@
 仓库内 E2E 回归脚本（沉淀自 /private/tmp/shenlan-pty-check）。
   mock 依次返回 write 新文件 → write 已有文件 → edit → 最终文本。
   断言：
-    - 滚动区出现 ✏️ Added <路径> / ✏️ Updated <路径> 及内容预览行（各恰好一次）
+    - Scrollback contains Write(path) / Update(path) headers and previews exactly once.
     - 完成后（phase idle）卡片仍在（<Static> 持久，不重绘）
     - 全程无 \\x1b[2J\\x1b[3J\\x1b[H 整屏清空序列
     - 真实工具确实执行：磁盘上 newfile.txt 创建、existing.txt 被覆盖、editme.txt 被替换
@@ -12,6 +12,7 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import pty
 import select
 import shutil
@@ -204,7 +205,8 @@ except ChildProcessError:
 server.shutdown()
 
 bytes_out = bytes(out)
-text = bytes_out.decode("utf-8", errors="replace")
+raw_text = bytes_out.decode("utf-8", errors="replace")
+text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", raw_text)
 with open(CAPTURE, "wb") as f:
     f.write(bytes_out)
 
@@ -222,16 +224,16 @@ def expect(cond, label):
 
 
 # 卡片首行与预览行各恰好一次（<Static> 增量写入，不重绘）
-expect(text.count("✏️ Added newfile.txt") == 1, "✏️ Added newfile.txt 恰好一次")
-expect(text.count("✏️ Updated existing.txt") == 1, "✏️ Updated existing.txt 恰好一次")
-expect(text.count("✏️ Updated editme.txt") == 1, "✏️ Updated editme.txt 恰好一次")
+expect(text.count("Write(newfile.txt)") == 1, "Write(newfile.txt) appears exactly once")
+expect(text.count("Update(existing.txt)") == 1, "Update(existing.txt) appears exactly once")
+expect(text.count("Update(editme.txt)") == 1, "Update(editme.txt) appears exactly once")
 expect("hello" in text and "world" in text, "write 新文件内容预览行")
 expect("replacement" in text and "line2" in text, "write 已有文件内容预览行")
 expect("- old line" in text and "+ new line" in text, "edit -/+ 预览块")
 # 完成后（phase idle）卡片仍在：文本回复出现在卡片之后
-expect(text.index("全部完成") > text.index("✏️ Added newfile.txt"), "完成后卡片仍在滚动区")
+expect(text.find("全部完成") > text.find("Write(newfile.txt)") >= 0, "完成后卡片仍在滚动区")
 # 无整屏清空序列
-expect("\x1b[2J\x1b[3J\x1b[H" not in text, "无整屏清空序列")
+expect("\x1b[2J\x1b[3J\x1b[H" not in raw_text, "无整屏清空序列")
 # 无错误行
 expect("✖" not in text, "无错误行")
 # 真实工具执行（磁盘验证）
