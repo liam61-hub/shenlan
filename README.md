@@ -15,7 +15,17 @@ node packages/cli/dist/index.js --version
 node packages/cli/dist/index.js
 ```
 
-Requires Node.js 22+. No public npm package yet; to update a source install, pull from GitHub and rebuild.
+Requires Node.js 22+. This source checkout is the supported distribution path; there is no public npm package yet. To update an existing checkout:
+
+```bash
+cd shenlan
+git pull --ff-only origin master
+npm ci
+npm run build
+node packages/cli/dist/index.js
+```
+
+Run the CLI from the repository root with `node packages/cli/dist/index.js`. `npm ci` installs the exact dependencies recorded in the lockfile, and rebuilding refreshes the CLI after each update.
 
 ## Contributing & reporting vulnerabilities
 

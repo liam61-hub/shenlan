@@ -9,8 +9,35 @@ git clone https://github.com/liam61-hub/shenlan.git
 cd shenlan
 npm ci
 npm run build
+node packages/cli/dist/index.js --version
 node packages/cli/dist/index.js
 ```
+
+### Updating a source checkout
+
+From the repository root, pull the latest supported branch and rebuild before starting the CLI:
+
+```bash
+git pull --ff-only origin master
+npm ci
+npm run build
+node packages/cli/dist/index.js
+```
+
+`npm ci` uses the checked-in lockfile, so it gives a clean, reproducible dependency install after checkout or an update.
+
+## 更新源码检出
+
+在仓库根目录拉取受支持分支并重新构建，然后启动 CLI：
+
+```bash
+git pull --ff-only origin master
+npm ci
+npm run build
+node packages/cli/dist/index.js
+```
+
+`npm ci` 按仓库锁文件安装依赖，确保干净检出和更新后的依赖一致。
 
 ## 使用前准备
 

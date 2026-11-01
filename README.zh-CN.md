@@ -15,7 +15,16 @@ node packages/cli/dist/index.js --version
 node packages/cli/dist/index.js
 ```
 
-需要 Node.js 22+。公开 npm 包尚未发布；已有私有包用户继续使用各自的本机 registry 配置。源码更新请从 GitHub 拉取后重新构建。
+需要 Node.js 22+。当前支持从源码检出运行，公开 npm 包尚未发布。更新已有检出时，在仓库根目录执行：
+
+```bash
+git pull --ff-only origin master
+npm ci
+npm run build
+node packages/cli/dist/index.js
+```
+
+`npm ci` 按仓库锁文件安装依赖；每次更新后重新构建，再从仓库根目录启动 CLI。
 
 ## 参与贡献与报告漏洞
 
