@@ -579,10 +579,18 @@ describe('runAgentLoop — /goal 长任务模式', () => {
 });
 
 describe('压缩摘要模型预算与 usage', () => {
+  const summaryConfig: ShenlanConfig = {
+    ...baseConfig,
+    model: { ...baseConfig.model, apiKey: 'test-summary' },
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     resetSessionCost();
+    vi.stubEnv('DEEPSEEK_API_KEY', '');
+    vi.stubEnv('SHENLAN_API_KEY', '');
   });
+  afterEach(() => { vi.unstubAllEnvs(); });
 
   function longConversation(): Message[] {
     return Array.from({ length: 44 }, (_, index) => ({
@@ -598,7 +606,7 @@ describe('压缩摘要模型预算与 usage', () => {
       choices: [{ index: 0, message: { role: 'assistant', content: 'summary' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     });
-    const result = await compactContext(baseConfig, longConversation());
+    const result = await compactContext(summaryConfig, longConversation());
     expect(result.method).toBe('llm');
     expect(vi.mocked(chat)).toHaveBeenCalledOnce();
   });
@@ -612,7 +620,7 @@ describe('压缩摘要模型预算与 usage', () => {
     });
 
     const result = await compactContext({
-      ...baseConfig,
+      ...summaryConfig,
       context: {
         autoCompactTokenLimit: 200_000,
         keepRecentTurns: 20,
@@ -623,6 +631,12 @@ describe('压缩摘要模型预算与 usage', () => {
 
     expect(result.method).toBe('llm');
     expect(getSessionCost()).toMatchObject({ promptTokens: 42, completionTokens: 12, calls: 1 });
+  });
+
+  it('uses rule compression without calling the model when credentials are absent', async () => {
+    const result = await compactContext(baseConfig, longConversation());
+    expect(result.method).toBe('rule');
+    expect(chat).not.toHaveBeenCalled();
   });
 });
 
