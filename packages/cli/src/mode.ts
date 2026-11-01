@@ -1,7 +1,7 @@
 /**
  * 模式管理 — 四态循环 + Plan Mode
  *
- * default → acceptEdits → bypassPermissions → plan → default
+ * default → acceptEdits → plan → bypassPermissions → default
  */
 import type { PermissionMode, ShenlanConfig } from '@shenlan/core';
 
@@ -32,7 +32,7 @@ export function setMode(mode: RunMode): void {
 
 /** 四态循环切换 */
 export function cycleMode(): RunMode {
-  const order: RunMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
+  const order: RunMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
   const idx = order.indexOf(currentMode);
   currentMode = order[(idx + 1) % order.length];
   return currentMode;
@@ -67,6 +67,11 @@ export function isPlanShellBlocked(command: string, config: ShenlanConfig): stri
     if (pattern.test(trimmed)) {
       return `sensitive command denied in plan mode: "${trimmed.slice(0, 80)}"`;
     }
+  }
+
+  // A read-only prefix must not authorize a chained command, redirection, or substitution.
+  if (/[\r\n;&|<>`$()]/u.test(trimmed)) {
+    return `compound shell syntax denied in plan mode: "${trimmed.slice(0, 80)}"`;
   }
 
   const whitelist = config.planMode?.readonlyCommands ?? [];

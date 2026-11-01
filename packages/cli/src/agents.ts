@@ -5,6 +5,7 @@
  */
 import type { ShenlanConfig } from '@shenlan/core';
 import { runSubTask } from '@shenlan/core';
+import type { SubTaskProgress } from '@shenlan/core';
 import { getEffectiveModel } from './router.js';
 
 interface SubTask {
@@ -51,6 +52,7 @@ function decomposeTask(task: string): SubTask[] {
 export async function runAgents(
   task: string,
   config: ShenlanConfig,
+  onProgress?: (message: string) => void,
 ): Promise<string> {
   const subtasks = decomposeTask(task);
   if (subtasks.length <= 1) {
@@ -62,9 +64,18 @@ export async function runAgents(
   const startTime = Date.now();
 
   // 并发执行
-  const results = await Promise.all(
-    subtasks.map(s => runSubTask(s.input, s.goal, config, model, 20)),
-  );
+  onProgress?.(`Split into ${subtasks.length} sub-tasks; starting them in parallel.`);
+  const results = await Promise.all(subtasks.map((s) => runSubTask(
+    s.input,
+    s.goal,
+    config,
+    model,
+    20,
+    undefined,
+    (progress: SubTaskProgress) => {
+      onProgress?.(`Task ${s.id}/${subtasks.length} · ${s.goal}: ${progressText(progress)}`);
+    },
+  )));
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   const successCount = results.filter(r => r.success).length;
@@ -77,4 +88,13 @@ export async function runAgents(
   }
 
   return output;
+}
+
+function progressText(progress: SubTaskProgress): string {
+  switch (progress.kind) {
+    case 'started': return 'started';
+    case 'round': return `${progress.title} in progress`;
+    case 'tool': return `working on ${progress.title}`;
+    case 'stage': return progress.title;
+  }
 }

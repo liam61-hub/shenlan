@@ -75,7 +75,10 @@ export function TableBlock({ content }: { content: string }): React.ReactElement
   for (; i < lines.length; i++) {
     if (isPipeRow(lines[i])) rows.push(splitPipeRow(lines[i]));
   }
-  const widths = tableColumnWidths(header, rows, Math.max(20, (process.stdout.columns || 80) - 4));
+  // AssistantFrame reserves 5 terminal columns (left indent, padding,
+  // and the final safe column). Keep table rows and rules inside that width so
+  // the terminal never wraps a rendered separator onto a second line.
+  const widths = tableColumnWidths(header, rows, Math.max(1, (process.stdout.columns || 80) - 5));
 
   return (
     <Box flexDirection="column">

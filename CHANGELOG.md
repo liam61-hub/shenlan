@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0] — 2026-11-01
+
+### Added
+
+- A unified subtask tree with grouped development, verification, documentation and commit items, plus progress reconciliation reminders.
+- Immediate execution records for supported test, build and commit commands, preserving test summaries, failures and commit hashes.
+- Explicit Plan-to-implementation permission selection, including a fallback when a plan ends without a handoff tool call.
+
+### Improved
+
+- Coalesce consecutive reads while updating the current file, and compact repeated ordinary shell output.
+- Improve conversation headings, status colors, terminal layout and sub-agent progress reporting.
+- Cache development-launcher build checks and keep ordinary keystrokes local to the input component.
+- Preserve explicit permission denials and reject compound shell syntax in Plan mode.
+
+
 > Public changelog since v0.4.0. Earlier versions were internal.
 
 ## [0.4.90] — 2026-10-05

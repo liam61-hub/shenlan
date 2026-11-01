@@ -107,9 +107,11 @@ export function buildConfirmOptions(
   const zh = language === 'zh-CN';
   if (kind === 'plan') {
     return [
-      { label: zh ? '实施此计划' : 'Yes, implement this plan', key: '1', value: 'allow' },
-      { label: zh ? '清空上下文后实施' : 'Yes, clear context and implement', key: '2', value: 'allow_clear' },
-      { label: zh ? '留在计划模式' : 'No, stay in Plan mode', key: '3', value: 'deny' },
+      { label: zh ? '切换到 Normal 并实施' : 'Switch to Normal and implement', key: '1', value: 'allow' },
+      { label: zh ? '切换到 Accept Edits 并实施' : 'Switch to Accept Edits and implement', key: '2', value: 'allow_edit' },
+      { label: zh ? '切换到 Bypass 并实施' : 'Switch to Bypass and implement', key: '3', value: 'allow_bypass' },
+      { label: zh ? '清空上下文后用 Normal 实施' : 'Clear context and implement in Normal', key: '4', value: 'allow_clear' },
+      { label: zh ? '留在 Plan 模式' : 'Stay in Plan mode', key: '5', value: 'deny' },
     ];
   }
   if (kind === 'delete') {

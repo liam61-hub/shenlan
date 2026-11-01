@@ -24,6 +24,7 @@ import {
   expandPasteTokensAt,
   hasPastePlaceholder,
   clearPasteStore,
+  shouldSyncInputValue,
   type ExpandedKey,
 } from '../input-events.js';
 import { maxInputLines, SLASH_MAX, slashWindowStart } from '../dynamic-budget.js';
@@ -169,6 +170,16 @@ export function InputBox() {
 
   const [cursor, setCursor] = useState(0);
   const [historyIdx, setHistoryIdx] = useState(-1);
+  const [inputValue, setInputValue] = useState(state.inputValue);
+  const syncedInputValueRef = useRef(state.inputValue);
+  useEffect(() => {
+    if (syncedInputValueRef.current === state.inputValue) return;
+    syncedInputValueRef.current = state.inputValue;
+    if (inputValue !== state.inputValue) {
+      setInputValue(state.inputValue);
+      setCursor(state.inputValue.length);
+    }
+  }, [state.inputValue, inputValue]);
   // 面板选中项 ref：Ink 把同一块输入拆成多次 useInput 回调且共用同一批
   // React 状态（dispatch 异步），连续按键（如 ↓+Enter）会读到旧快照；
   // ref 在 dispatch 时同步更新，跨回调保持最新值，render 后再与 state 对齐。
@@ -522,7 +533,9 @@ export function InputBox() {
       case '/agents': case '/a': {
         if (!args) { reply('  Usage: /agents <task with numbered sub-tasks>'); return false; }
         reply(`  ⬡ Decomposing and running sub-agents...`);
-        runAgents(args, config).then(result => {
+        runAgents(args, config, progress => {
+          dispatch({ type: 'ADD_SYSTEM_MSG', content: `  ⬡ ${progress}` });
+        }).then(result => {
           dispatch({ type: 'ADD_SYSTEM_MSG', content: result });
         }).catch(err => {
           dispatch({ type: 'ADD_SYSTEM_MSG', content: `  Agent error: ${err.message}` });
@@ -579,13 +592,16 @@ export function InputBox() {
     // 避免快速键入或弹窗快捷键连发时「回车不生效 → 界面像挂起」。
     const events = expandInputEvents(rawInput, rawKey as ExpandedKey);
     // 多事件块内的本地镜像：同块内前一个事件对输入框/反馈文本的修改对后一个事件可见
-    let value = state.inputValue;
+    let value = inputValue;
     let pos = cursor;
     let fbText = state.confirmPrompt?.feedbackText ?? '';
-    const commitInput = (v: string, p: number) => {
+    const commitInput = (v: string, p: number, layoutChanged = false) => {
       value = v;
       pos = p;
-      dispatch({ type: 'SET_INPUT', value: v });
+      setInputValue(v);
+      if (shouldSyncInputValue(v, Boolean(state.slashSuggestions), layoutChanged)) {
+        dispatch({ type: 'SET_INPUT', value: v });
+      }
       setCursor(p);
     };
 
@@ -1239,23 +1255,26 @@ export function InputBox() {
           continue;
         }
 
-        // plan 模式退出确认：1/2/3 直接选择，Enter 确认当前项
+        // Plan 实施确认：1-5 直接选择，Enter 确认当前项
         if (p.kind === 'plan') {
           const resolvePlan = (result: string) => {
-            if (result === 'allow') {
-              dispatch({ type: 'SET_MODE', mode: 'default' as any });
-              dispatch({ type: 'ADD_SYSTEM_MSG', content: '  Implement plan — mode: NORMAL' });
-            } else if (result === 'allow_clear') {
-              clearSessionApprovals();
-              dispatch({ type: 'SET_MODE', mode: 'default' as any });
-              dispatch({ type: 'CLEAR_CONTEXT' });
-              dispatch({ type: 'ADD_SYSTEM_MSG', content: '  Implement plan with fresh context — mode: NORMAL' });
+            if (result === 'allow' || result === 'allow_edit' || result === 'allow_bypass' || result === 'allow_clear') {
+              const nextMode: RunMode = result === 'allow_edit'
+                ? 'acceptEdits'
+                : result === 'allow_bypass' ? 'bypassPermissions' : 'default';
+              dispatch({ type: 'SET_MODE', mode: nextMode });
+              if (result === 'allow_clear') {
+                clearSessionApprovals();
+                dispatch({ type: 'CLEAR_CONTEXT' });
+              }
+              const modeName = modeLabel(nextMode);
+              dispatch({ type: 'ADD_SYSTEM_MSG', content: `  Implement plan — mode: ${modeName}` });
             } else {
               dispatch({ type: 'ADD_SYSTEM_MSG', content: '  Staying in PLAN mode' });
             }
             dispatch({ type: 'CONFIRM_RESULT', result });
           };
-          if (input === '1' || input === '2' || input === '3') {
+          if (['1', '2', '3', '4', '5'].includes(input)) {
             resolvePlan(p.options[Number(input) - 1].value);
             continue;
           }
@@ -1371,7 +1390,7 @@ export function InputBox() {
         }
         if (!state.inputHistory.length) continue;
         const idx = historyIdx === -1 ? state.inputHistory.length - 1 : Math.max(0, historyIdx - 1);
-        setHistoryIdx(idx); commitInput(state.inputHistory[idx], state.inputHistory[idx].length); continue;
+        setHistoryIdx(idx); commitInput(state.inputHistory[idx], state.inputHistory[idx].length, true); continue;
       }
       if (key.downArrow) {
         const s = state.slashSuggestions;
@@ -1382,8 +1401,8 @@ export function InputBox() {
           continue;
         }
         if (historyIdx === -1) continue;
-        if (historyIdx < state.inputHistory.length - 1) { const idx = historyIdx + 1; setHistoryIdx(idx); commitInput(state.inputHistory[idx], state.inputHistory[idx].length); }
-        else { setHistoryIdx(-1); commitInput('', 0); } continue;
+        if (historyIdx < state.inputHistory.length - 1) { const idx = historyIdx + 1; setHistoryIdx(idx); commitInput(state.inputHistory[idx], state.inputHistory[idx].length, true); }
+        else { setHistoryIdx(-1); commitInput('', 0, true); } continue;
       }
 
       // Shift+Tab → mode
@@ -1448,9 +1467,9 @@ export function InputBox() {
       // Backspace / Delete（按光标位置删除）
       if (key.backspace || key.delete) {
         if (key.delete) {
-          if (pos < value.length) { commitInput(value.slice(0, pos) + value.slice(pos + 1), pos); }
+          if (pos < value.length) { commitInput(value.slice(0, pos) + value.slice(pos + 1), pos, value[pos] === '\n'); }
         } else if (pos > 0) {
-          commitInput(value.slice(0, pos - 1) + value.slice(pos), pos - 1);
+          commitInput(value.slice(0, pos - 1) + value.slice(pos), pos - 1, value[pos - 1] === '\n');
         }
         continue;
       }
@@ -1463,7 +1482,7 @@ export function InputBox() {
 
       // Text input（插入到光标处，支持粘贴多字符）
       if (input?.length > 0) {
-        commitInput(value.slice(0, pos) + input + value.slice(pos), pos + input.length);
+        commitInput(value.slice(0, pos) + input + value.slice(pos), pos + input.length, input.includes('\n'));
         continue;
       }
     }
@@ -1476,7 +1495,7 @@ export function InputBox() {
     const pasted = normalizePastedText(text);
     if (!pasted) return;
     // 已有占位符时先展开（再粘贴一次 = 展开占位符，CC v2.1.116 行为），再处理新粘贴
-    let base = state.inputValue;
+    let base = inputValue;
     let baseCursor = cursor;
     if (hasPastePlaceholder(base)) {
       // 光标随展开内容同步映射，避免落到展开后内容的中间
@@ -1487,6 +1506,9 @@ export function InputBox() {
     // 大段粘贴（≥ 20 行）折叠为占位符、完整内容存进程内存储；小段仍内联多行插入
     const insert = shouldCollapsePaste(pasted) ? storePasteContent(pasted) : pasted;
     const next = insertAt(base, baseCursor, insert);
+    setInputValue(next.value);
+    // Paste is a discrete action (not per-character typing); keep the app snapshot
+    // synchronized so layout and existing observers see the pasted value immediately.
     dispatch({ type: 'SET_INPUT', value: next.value });
     setCursor(next.cursor);
   });
@@ -1502,8 +1524,8 @@ export function InputBox() {
 
   // 多行输入渲染：按行显示，光标定位到对应 (行, 列)，
   // 行数超预算时开窗口滚动并保证光标行可见（预算 maxInputLines(termHeight)）
-  const lines = state.inputValue.split('\n');
-  const { line: cursorLine, col: cursorCol } = cursorToLineCol(state.inputValue, cursor);
+  const lines = inputValue.split('\n');
+  const { line: cursorLine, col: cursorCol } = cursorToLineCol(inputValue, cursor);
   const win = inputWindow(lines.length, cursorLine, maxInputLines(termHeight));
   const visibleLines: Array<{ index: number; line: string }> = [];
   for (let i = win.start; i < win.end; i++) {

@@ -31,7 +31,7 @@ describe('background_agent 工具', () => {
   it('并发超限：返回错误含当前运行数，不排队', async () => {
     setBackgroundRunner(() => new Promise(() => {}));
     setAgentConfig(
-      { ...DEFAULT_CONFIG, agent: { maxSteps: 80, goalMaxSteps: 300, maxBackground: 1 } },
+      { ...DEFAULT_CONFIG, agent: { maxSteps: 80, maxBackground: 1 } },
       'deepseek-v4-flash',
     );
     const tool = getTool('background_agent')!;

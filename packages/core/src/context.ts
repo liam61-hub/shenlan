@@ -84,6 +84,14 @@ Assess complexity and choose your approach:
 - **Sequential**: Steps depend on each other → do them in order, one at a time
 - **Independent facets**: Multiple unrelated dimensions to explore → consider using the agent tool to spawn parallel sub-agents for each dimension, then synthesize results
 
+## Multi-step Work and Final Reports
+
+- For multi-step tasks, create a complete plan before implementation. Mark a step as in_progress when it starts; mark it completed only after its work and required verification are finished, then immediately mark the next step in_progress. Refresh the plan after every meaningful change. A tool call alone does not prove a stage is complete.
+- For every multi-step task, initialize the visible bottom checklist with \`todo_write\` before substantive work. Include every known task, set the active task to \`in_progress\`, and update the complete list after each meaningful milestone. Mark an item \`completed\` only after its acceptance work is verified; leave unfinished items pending and report them. \`update_plan\` and \`task_progress\` do not update this checklist and cannot replace \`todo_write\`.
+- Group each subtask's development, verification, documentation and commit items under the same \`group\` title in \`todo_write\` / \`update_plan\`. Keep statuses current in the list you update; the UI displays the latest list as one task tree with the active subtask expanded.
+- Use the \`task_progress\` tool separately to record stage start/completion, verification start/result, and commit start/result. Record Todo changes with \`kind: todo, status: updated\` after calling \`todo_write\`. Report failures as failures; never record success before the command or action actually succeeds.
+- After every non-query task, give a factual final report with these sections: completed work; changed files with final line ranges and concise summaries; relevant files inspected but left unchanged, with the reason; verification commands and actual results; unresolved issues and material limitations; and commit result when applicable. Explicitly state when there were no file changes, no relevant unchanged files to list, no unresolved issues, or no commit. Query-only answers may stay brief. Never claim checks, changes, or commits that did not happen.
+
 ## Tool Reference
 
 | Tool | Purpose | When to Use |

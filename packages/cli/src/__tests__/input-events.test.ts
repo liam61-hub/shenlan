@@ -16,8 +16,23 @@ import {
   expandPasteTokensAt,
   hasPastePlaceholder,
   clearPasteStore,
+  shouldSyncInputValue,
 } from '../input-events.js';
 import { displayWidth } from '../markdown-utils.js';
+
+describe('shouldSyncInputValue（输入状态同步）', () => {
+  it('keeps ordinary single-line typing local', () => {
+    expect(shouldSyncInputValue('hello', false)).toBe(false);
+    expect(shouldSyncInputValue('hello!', false)).toBe(false);
+  });
+
+  it('syncs slash queries, suggestion dismissal, and line-count changes', () => {
+    expect(shouldSyncInputValue('/hel', false)).toBe(true);
+    expect(shouldSyncInputValue('help', true)).toBe(true);
+    expect(shouldSyncInputValue('first\nsecond', false, true)).toBe(true);
+    expect(shouldSyncInputValue('first\nsecond', false)).toBe(false);
+  });
+});
 
 describe('normalizePastedText（粘贴文本归一化）', () => {
   it('CRLF / LF / 孤立 CR 统一为 LF', () => {

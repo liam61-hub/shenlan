@@ -1,20 +1,18 @@
 /**
  * StatusBar — Claude Code 风格的头部（村民头 logo）
  *
- *   ╷╷╷╷╷╷╷╷   SHENLAN v0.4.90
- *   ██•██•██   deepseek-v4-flash · NORMAL · master
- *   ████████   /Users/edy/work/code/shenlan
- *    ▘▘  ▝▝
+ *   ╷╷╷╷╷╷   SHENLAN v0.4.90
+ *   █•██•█   deepseek-v4-flash · NORMAL · master
+ *   ██████   /Users/edy/work/code/shenlan
  *
  * 画法沿用 Claude Code CLI（v2.1.272，PTY 抓帧比对）：
  *  - **实心块 = 背景色涂空格**（`backgroundColor`），**不用 `█`/`▐`/`▌` 任何整块字形**
  *    —— 这正是旧版村民头「方块字形缺失 → 整张脸空心」的根因所在；
  *  - 眼睛是圆点 `•`（原村民头同款、已验证可渲染），画在实心脸上，
  *    前景走终端默认色（浅底深点、深底亮点）；**不用格子挖洞**（挖洞会露出方形的底，很难看）；
- *  - 发用 `╷`（U+2577 竖线**下半段**，长度只有 `│` 的一半、下端仍接住脸），腿用 `▘▝` 角字形。
+ *  - 发用 `╷`（U+2577 竖线**下半段**，长度只有 `│` 的一半、下端仍接住脸）。
  *
- * 造型保留原村民头结构：发（竖线）／脸 + 两颗圆眼睛（居中偏上）／下巴（实心）／两条腿。
- * logo 占 10 列 + 2 空格 → 信息文本从第 12 列开始（与 Claude Code 对齐）。
+ * 造型保留村民头的发／脸／腿结构，压缩为 3 行 × 8 列；右侧文字统一从第 11 列开始。
  */
 import { Text, Box } from 'ink';
 import type { ReactNode } from 'react';
@@ -46,11 +44,10 @@ function Eye() {
 }
 
 /**
- * 村民头 logo，4 行 × 10 列（含左右各 1 列留白）。
- *   row0  发  ：8 个 `╷` 竖线（半长）
- *   row1  脸  ：实心 + 两颗圆点眼睛（列 3、6）
- *   row2  下巴：8 格实心
- *   row3  腿  ：▘▘ / ▝▝ 角字形
+ * 村民头 logo，3 行 × 8 列（含左右留白）。
+ *   row0  发  ：6 个 `╷` 竖线（半长）
+ *   row1  脸  ：实心 + 两颗圆点眼睛
+ *   row2  腿  ：左右各一组 `▘▘` / `▝▝`，紧贴脸部下缘
  *
  * 发为什么用 `╷`：`│`（U+2502）是**整格高**的竖线，显得头发太长；`╷`（U+2577
  * 「下」半线）只填格子**下半段**，长度恰为一半，且下端仍落在格底、接住下一行的脸，
@@ -59,11 +56,11 @@ function Eye() {
  */
 function LogoRow({ index }: { index: number }) {
   switch (index) {
-    case 0: // 发：8 根半长竖线（╷ = 只占下半格，长度减半、下端接脸）
+    case 0: // 发：6 根半长竖线（╷ = 只占下半格，长度减半、下端接脸）
       return (
         <Text>
           {' '}
-          <Corners s="╷╷╷╷╷╷╷╷" />
+          <Corners s="╷╷╷╷╷╷" />
           {' '}
         </Text>
       );
@@ -71,32 +68,26 @@ function LogoRow({ index }: { index: number }) {
       return (
         <Text>
           {' '}
-          <Block n={2} />
+          <Block n={1} />
           <Eye />
           <Block n={2} />
           <Eye />
-          <Block n={2} />
+          <Block n={1} />
           {' '}
         </Text>
       );
-    case 2: // 下巴（实心）
+    case 2: // 两条腿：保留原有角字形，紧贴脸部并居中到 8 列宽
       return (
         <Text>
           {' '}
-          <Block n={8} />
-          {' '}
-        </Text>
-      );
-    default: // 腿
-      return (
-        <Text>
-          {'  '}
           <Corners s="▘▘" />
           {'  '}
           <Corners s="▝▝" />
-          {'  '}
+          {' '}
         </Text>
       );
+    default:
+      return null;
   }
 }
 
@@ -136,19 +127,16 @@ export function StatusBar({ version }: { version: string }) {
     <Box flexDirection="column">
       {/* 顶部留白：与上方终端内容（命令行/提示符）隔开 */}
       <Box height={1} />
-      {/* logo 恒为 4 行；文字只贴前 3 行，第 4 行（腿）右侧留空 */}
-      {[0, 1, 2, 3].map(i => (
-        <Box key={i}>
-          <LogoRow index={i} />
-          {infoLines[i] ? (
-            <>
-              <Text>  </Text>
-              {infoLines[i]}
-            </>
-          ) : null}
+      {/* 固定 8 列 logo 区和 2 列间隔，让三行信息始终从同一列开始 */}
+      {[0, 1, 2].map(i => (
+        <Box key={i} flexDirection="row" alignItems="center">
+          <Box width={8} flexShrink={0}>
+            <LogoRow index={i} />
+          </Box>
+          <Text>  </Text>
+          {infoLines[i]}
         </Box>
       ))}
-      <Box height={1} />
     </Box>
   );
 }

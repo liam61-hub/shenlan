@@ -427,7 +427,7 @@ npm run clean
 
 ## Version
 
-Current version: **v0.4.90** — version history per [CHANGELOG.md](./CHANGELOG.md)
+Current version: **v0.5.0** — version history per [CHANGELOG.md](./CHANGELOG.md)
 
 ## License
 

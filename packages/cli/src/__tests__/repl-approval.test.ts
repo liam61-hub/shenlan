@@ -24,7 +24,7 @@ vi.mock('@shenlan/core', async (importOriginal) => {
 import { chatStream, executeToolCall } from '@shenlan/core';
 import { runAgentLoop, clearSessionApprovals } from '../repl.js';
 import type { AgentCallbacks, ConfirmRequestInfo } from '../repl.js';
-import { setMode } from '../mode.js';
+import { getMode, setMode } from '../mode.js';
 
 const cfg: ShenlanConfig = {
   model: { baseUrl: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-v4-flash', maxTokens: 8192 },
@@ -64,9 +64,9 @@ describe('approval in agent loop', () => {
 
   it('reuses only a safe command family, then clears grants on reset', async () => {
     script([
-      toolMessage('shell', { command: 'git status' }, 'a'),
-      toolMessage('shell', { command: 'git status --short' }, 'b'),
-      toolMessage('shell', { command: 'git status --short && echo unsafe' }, 'c'),
+      toolMessage('shell', { command: 'git log --oneline' }, 'a'),
+      toolMessage('shell', { command: 'git log --stat' }, 'b'),
+      toolMessage('shell', { command: 'git log --stat && echo unsafe' }, 'c'),
     ]);
     const prompts = await run('请检查仓库状态', () => 'allow_prefix');
     expect(prompts).toHaveLength(2);
@@ -77,7 +77,7 @@ describe('approval in agent loop', () => {
     expect(vi.mocked(executeToolCall).mock.calls.every(([, , options]) => options.permissions.allow.includes('shell'))).toBe(true);
 
     clearSessionApprovals();
-    script([toolMessage('shell', { command: 'git status' }, 'd')]);
+    script([toolMessage('shell', { command: 'git log --oneline' }, 'd')]);
     expect(await run('Check status', () => 'allow')).toHaveLength(1);
   });
 
@@ -90,6 +90,52 @@ describe('approval in agent loop', () => {
     ]);
     const prompts = await run('Please use these tools', () => 'allow_session');
     expect(prompts.map(p => p.kind)).toEqual(['external', 'destructive', 'destructive']);
+  });
+
+  it('offers an explicit approval prompt when the model requests Plan implementation', async () => {
+    setMode('plan');
+    script([toolMessage('exit_plan_mode', {}, 'plan-exit')]);
+    const prompts = await run('Start implementation', () => 'deny');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]?.kind).toBe('plan');
+  });
+
+  it('offers the handoff when a Plan turn finishes in prose', async () => {
+    setMode('plan');
+    script([{ role: 'assistant', content: 'Plan: inspect, fix, verify.' }]);
+    const prompts = await run('Prepare a plan', () => 'deny');
+    expect(prompts.map(prompt => prompt.kind)).toEqual(['plan']);
+    expect(getMode()).toBe('plan');
+    expect(executeToolCall).not.toHaveBeenCalled();
+  });
+
+  it('continues only after the user selects an implementation mode', async () => {
+    setMode('plan');
+    script([
+      { role: 'assistant', content: 'Plan ready.' },
+      toolMessage('edit', { file_path: 'sample.ts', old_string: 'a', new_string: 'b' }, 'implement'),
+    ]);
+    const prompts = await run('Prepare a plan', info => {
+      expect(info.kind).toBe('plan');
+      setMode('acceptEdits');
+      return 'allow_edit';
+    });
+    expect(prompts).toHaveLength(1);
+    expect(executeToolCall).toHaveBeenCalledOnce();
+    expect(getMode()).toBe('acceptEdits');
+  });
+
+  it('requires the Plan choice even when configured permissions bypass approval', async () => {
+    setMode('plan');
+    script([toolMessage('exit_plan_mode', {}, 'handoff')]);
+    const onConfirm = vi.fn(async () => 'deny');
+    await runAgentLoop('', { ...cfg, permissions: { mode: 'bypassPermissions', allow: [], deny: [] } },
+      [{ role: 'user', content: 'Prepare a plan' }], {
+        onToken: () => {}, onToolStart: () => {}, onToolDone: () => {}, onToolError: () => {},
+        onComplete: () => {}, onError: error => { throw error; }, onConfirm,
+      });
+    expect(onConfirm).toHaveBeenCalledOnce();
+    expect(executeToolCall).not.toHaveBeenCalled();
   });
 
   it('passes explicit deny through the shared boundary even in bypass mode', async () => {

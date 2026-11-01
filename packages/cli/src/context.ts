@@ -19,6 +19,7 @@ export interface ToolStepHistory {
   detail: string;
   outcome: 'done' | 'error';
   durationMs: number;
+  runs?: number;
 }
 
 export interface HistoryItem {
@@ -50,6 +51,7 @@ export interface ToolStatusSnapshot {
 
 // ===== Tool status (dynamic region, 有界帧内) =====
 export interface ToolStatus {
+  grouped?: boolean;
   id: string;
   name: string;
   detail: string;
@@ -276,6 +278,7 @@ export interface AppState {
   // session 级工具状态（todo_write / update_plan，动态区最小 UI）
   todos: TodoItem[];
   plan: PlanItem[];
+  taskListSource?: 'todos' | 'plan';
 
   // confirm
   confirmPrompt: ConfirmPrompt | null;
@@ -325,9 +328,10 @@ export type AppAction =
   | { type: 'THINKING_END' }
   | { type: 'BG_TASK_START'; id: string; goal: string }
   | { type: 'BG_TASK_DONE'; id: string; goal: string; success: boolean; summary: string }
-  | { type: 'TOOL_START'; id: string; name: string; detail: string }
-  | { type: 'TOOL_DONE'; id: string; name: string; detail: string }
+  | { type: 'TOOL_START'; id: string; name: string; detail: string; grouped?: boolean }
+  | { type: 'TOOL_DONE'; id: string; name: string; detail: string; recordHistory?: boolean }
   | { type: 'TOOL_RESULT'; id: string; name: string; detail: string; content: string; isError: boolean; fileChange?: FileChange }
+  | { type: 'TOOL_GROUP_RESULT'; id: string; name: string; detail: string; outcome: 'done' | 'error'; durationMs: number; runs: number; content: string }
   | { type: 'TOOL_ERROR'; id: string; name: string; error: string }
   | { type: 'TODOS'; todos: TodoItem[] }
   | { type: 'PLAN'; plan: PlanItem[] }

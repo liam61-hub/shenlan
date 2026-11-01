@@ -37,6 +37,25 @@ function renderToRaw(node: React.ReactElement): string {
 }
 
 describe('renderMarkdown（MessageItem 渲染器）', () => {
+  it('为结构化段落标题添加彩色标识，并在多段结构中自动编号', () => {
+    const raw = renderToRaw(
+      <MessageItem
+        role="assistant"
+        content={'## **名称与来历**\n巴公房子由俄商投资兴建。\n\n## **位置**\n位于汉口。\n\n## **建筑特色**\n具有三角形平面。'}
+      />,
+    );
+    expect(raw).toContain('\x1b[36m1. ');
+    expect(raw).toContain('\x1b[35m◆ ');
+    expect(raw).toContain('名称与来历');
+    expect(raw).toContain('\x1b[36m3. ');
+  });
+
+  it('不为单个小节自动编号', () => {
+    const raw = renderToRaw(<MessageItem role="assistant" content={'## **位置**\n位于汉口。'} />);
+    expect(raw).toContain('◆ ');
+    expect(raw).not.toContain('1. ◆');
+  });
+
   it('会话文本的重点词按语义着色，流式行沿用相同高亮', () => {
     const completed = renderToRaw(
       <MessageItem role="assistant" content="注意：发生错误；操作成功，任务已完成。" />,
@@ -49,6 +68,19 @@ describe('renderMarkdown（MessageItem 渲染器）', () => {
     const streaming = renderToRaw(<StreamingLine text="Important: success" />);
     expect(streaming).toContain('\x1b[36mImportant\x1b[39m');
     expect(streaming).toContain('\x1b[32msuccess\x1b[39m');
+  });
+
+  it('助手正文和流式行不显示左竖线，编号标题在两种渲染路径中均使用青色', () => {
+    const body = '1. 万圣节在中国已变成“社交娱乐节”\n它不算法定假日。';
+    const completed = renderToRaw(<MessageItem role="assistant" content={body} />);
+    const streaming = renderToRaw(<StreamingLine text="1. 万圣节在中国已变成“社交娱乐节”" />);
+
+    expect(completed).not.toContain('│');
+    expect(streaming).not.toContain('│');
+    expect(completed).toContain('\x1b[36m万圣节在中国已变成“社交娱乐节”\x1b[39m');
+    expect(streaming).toContain('\x1b[36m万圣节在中国已变成“社交娱乐节”\x1b[39m');
+    expect(completed).toContain('它不算法定假日。');
+    expect(completed).not.toContain('\x1b[36m它不算法定假日。');
   });
 
   it('任务列表按状态、编号和技术关键词着色', () => {
@@ -67,6 +99,31 @@ describe('renderMarkdown（MessageItem 渲染器）', () => {
     expect(raw).toContain('\x1b[36mTIME_WAIT\x1b[39m');
     expect(raw).toContain('\x1b[2m[ ]\x1b[22m');
     expect(raw).toContain('\x1b[32m全绿\x1b[39m');
+  });
+
+  it('原始状态清单行按整行区分进行中、待办和已完成', () => {
+    const content = '[→] 进行中任务\n[ ] 待处理任务\n[✓] 已完成任务';
+    for (const render of [
+      () => renderToRaw(<MessageItem role="assistant" content={content} />),
+      () => renderToRaw(<StreamingLine text="[→] 进行中任务" />),
+      () => renderToRaw(<StreamingLine text="[ ] 待处理任务" />),
+      () => renderToRaw(<StreamingLine text="[✓] 已完成任务" />),
+    ]) {
+      const raw = render();
+      if (raw.includes('进行中任务')) {
+        expect(raw).toContain('\x1b[33m');
+        expect(raw).toContain('进行中任务');
+      }
+      if (raw.includes('待处理任务')) {
+        expect(raw).toContain('\x1b[2m');
+        expect(raw).toContain('待处理任务');
+      }
+      if (raw.includes('已完成任务')) {
+        expect(raw).toContain('\x1b[32m');
+        expect(raw).toContain('☑');
+        expect(raw).toContain('已完成任务');
+      }
+    }
   });
 
   it('单行 $$...$$ 公式块正常渲染（回归：曾因索引回退导致无限循环）', () => {
@@ -147,6 +204,17 @@ describe('renderMarkdown（MessageItem 渲染器）', () => {
     expect(text).toContain('2. 第二步');
   });
 
+  it('有序列表标题中的粗体中文冒号不会拆坏 Markdown 配对', () => {
+    const raw = renderToRaw(
+      <MessageItem role="assistant" content={'1. **1910—1949：俄商公寓**\n   巴公房子是出租公寓。\n2. **20 世纪中后期：居民住宅**\n   后来成为居民住宅。'} />,
+    );
+    expect(raw).toContain('1910—1949：俄商公寓');
+    expect(raw).toContain('20 世纪中后期：居民住宅');
+    expect(raw).not.toContain('**');
+    expect(raw).toContain('\x1b[36m'); // Cyan list number.
+    expect(raw).toContain('\x1b[33m'); // Yellow section title.
+  });
+
   it('标题在上一行非空时前加 1 空行，空行时不重复加', () => {
     // 正文 + 标题 → 正文/空行/标题 3 个节点
     expect(renderMarkdown('正文\n# 标题').length).toBe(3);
@@ -206,25 +274,25 @@ describe('formatUserBlock（用户消息青蓝圆点 + 加粗正文）', () => {
 });
 
 describe('助手消息安全折行', () => {
-  it('完成态 CJK 折行后每个视觉行都有竖线，且保留终端最后一列', () => {
+  it('完成态 CJK 折行保持统一缩进，且保留终端最后一列', () => {
     const text = renderToText(
       <MessageItem role="assistant" content={'中文'.repeat(12)} termWidth={20} />,
     );
     const lines = text.split('\n').filter(line => line.includes('中') || line.includes('文'));
 
     expect(lines.length).toBeGreaterThan(1);
-    expect(lines.every(line => line.startsWith('  │ '))).toBe(true);
+    expect(lines.every(line => line.startsWith('    '))).toBe(true);
     expect(lines.every(line => displayWidth(line) <= 19)).toBe(true);
   });
 
-  it('流式冻结行折行后延续竖线，不从窗口左侧或末列继续', () => {
+  it('流式冻结行折行后保持统一缩进，不从窗口左侧或末列继续', () => {
     const text = renderToText(
       <StreamingLine text={`prefix-${'中'.repeat(12)}-suffix`} termWidth={20} />,
     );
     const lines = text.split('\n').filter(line => line.trim() !== '');
 
     expect(lines.length).toBeGreaterThan(1);
-    expect(lines.every(line => line.startsWith('  │ '))).toBe(true);
+    expect(lines.every(line => line.startsWith('    '))).toBe(true);
     expect(lines.every(line => displayWidth(line) <= 19)).toBe(true);
   });
 });

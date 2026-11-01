@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AppState, ModelOption } from '../context.js';
-import { reducer, extractGoalFromMessages, stripGoalBlock } from '../app.js';
+import { reducer, extractGoalFromMessages, messagesToHistory, stripGoalBlock } from '../app.js';
 import { setMode } from '../mode.js';
 import type { McpServerStatus, SkillEntry } from '@shenlan/core';
 import type { ConfigRow } from '../commands/config.js';
@@ -67,6 +67,28 @@ describe('reducer 后台任务 UI 状态（BG_TASK_START / BG_TASK_DONE）', () 
     let s = reducer(baseState(), { type: 'BG_TASK_START', id: 'bg-1', goal: 'g' });
     s = reducer(s, { type: 'CLEAR_SESSION' });
     expect(s.bgTasks).toHaveLength(0);
+  });
+});
+
+describe('reducer TOOL_GROUP_RESULT（重复工具调用分组合并）', () => {
+  it('追加一个累计耗时的工具步骤和保留各次结果的摘要', () => {
+    const state = reducer(baseState(), {
+      type: 'TOOL_GROUP_RESULT',
+      id: 'group-1',
+      name: 'read',
+      detail: 'docs/NEXT.md',
+      outcome: 'done',
+      durationMs: 300,
+      runs: 3,
+      content: '1. read NEXT.md: lines 1-80 of 181 · 2. read NEXT.md: lines 80-181 of 181',
+    });
+
+    expect(state.history).toHaveLength(2);
+    expect(state.history[0]?.toolStep).toMatchObject({
+      name: 'read', detail: 'docs/NEXT.md', durationMs: 300, runs: 3,
+    });
+    expect(state.history[1]?.content).toContain('lines 1-80 of 181');
+    expect(state.history[1]?.content).toContain('lines 80-181 of 181');
   });
 });
 
@@ -160,6 +182,39 @@ describe('reducer TOOL_DONE（工具步骤固化）', () => {
       outcome: 'error',
     });
     expect(failed.toolStatuses[0]).toMatchObject({ state: 'error', detail: 'code 1' });
+  });
+
+  it('允许工具运行状态结束但不写入单独历史步骤', () => {
+    const started = reducer(baseState(), {
+      type: 'TOOL_START', id: 'shell-1', name: 'shell', detail: 'git status',
+    });
+    const done = reducer(started, {
+      type: 'TOOL_DONE', id: 'shell-1', name: 'shell', detail: 'git status', recordHistory: false,
+    });
+
+    expect(done.history).toEqual([]);
+    expect(done.toolStatuses[0]).toMatchObject({ id: 'shell-1', state: 'done' });
+  });
+});
+
+describe('messagesToHistory（恢复 Shell 摘要）', () => {
+  it('只合并会话记录中相邻的同命令 Shell 结果', () => {
+    const history = messagesToHistory([
+      { role: 'assistant', content: null, tool_calls: [{ id: 's1', type: 'function', function: { name: 'shell', arguments: '{"command":"git status"}' } }] },
+      { role: 'tool', tool_call_id: 's1', content: ' M a\n' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 's2', type: 'function', function: { name: 'shell', arguments: '{"command":"git status"}' } }] },
+      { role: 'tool', tool_call_id: 's2', content: ' M a\n M b\n' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'r1', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'r1', content: 'read a.ts: 2 lines' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 's3', type: 'function', function: { name: 'shell', arguments: '{"command":"git status"}' } }] },
+      { role: 'tool', tool_call_id: 's3', content: ' M c\n' },
+    ]);
+
+    expect(history.map(item => item.content)).toEqual([
+      'shell git status: +  M b',
+      'read a.ts: 2 lines',
+      'shell git status: M c',
+    ]);
   });
 });
 
@@ -969,5 +1024,49 @@ describe('reducer TOKEN（流式行冻结：跨行行内代码 span）', () => {
       },
       { key: 'line-1', role: 'assistant-line', content: '正文', code: false },
     ]);
+  });
+});
+
+describe('live grouped tool rows', () => {
+  it('replaces the completed read target until one final group enters scrollback', () => {
+    let state = baseState();
+    for (const [index, detail] of ['proxy_resilience.rs', 'integration.rs', 'body_limit.rs', 'metrics.rs'].entries()) {
+      const id = String(index);
+      state = reducer(state, { type: 'TOOL_START', id, name: 'read', detail, grouped: true });
+      expect(state.toolStatuses).toHaveLength(1);
+      expect(state.toolStatuses[0]).toMatchObject({ detail, state: 'running' });
+      state = reducer(state, { type: 'TOOL_DONE', id, name: 'read', detail, recordHistory: false });
+      expect(state.history).toHaveLength(0);
+      expect(state.toolStatuses[0]).toMatchObject({ detail, state: 'done', grouped: true });
+    }
+    state = reducer(state, {
+      type: 'TOOL_GROUP_RESULT', id: 'reads', name: 'read', detail: 'metrics.rs',
+      outcome: 'done', durationMs: 400, runs: 4, content: 'read metrics.rs: lines 1-30 of 205',
+    });
+    expect(state.toolStatuses).toHaveLength(0);
+    expect(state.history).toHaveLength(2);
+    expect(state.history[0]?.toolStep).toMatchObject({ name: 'read', detail: 'metrics.rs', runs: 4 });
+    expect(state.history[1]?.content).toContain('metrics.rs');
+  });
+});
+
+describe('restored shell lifecycle evidence', () => {
+  it('retains commit hashes and each repeated test outcome', () => {
+    const messages: import('@shenlan/core').Message[] = [];
+    for (const [id, command, content] of [
+      ['commit', 'git commit -m fix', 'Scan passed\n[main f3714bc] test: cover try_files'],
+      ['test1', 'cargo test', 'Compiling\ntest result: FAILED. 4 passed; 1 failed'],
+      ['test2', 'cargo test', 'Compiling\ntest result: ok. 5 passed; 0 failed'],
+    ]) {
+      messages.push({ role: 'assistant', content: null, tool_calls: [
+        { id, type: 'function', function: { name: 'shell', arguments: JSON.stringify({ command }) } },
+      ] }, { role: 'tool', tool_call_id: id, content });
+    }
+    const history = messagesToHistory(messages);
+    const text = history.map(item => item.content).join('\n');
+    expect(text).toContain('[main f3714bc]');
+    expect(text).toContain('cargo test failed');
+    expect(text).toContain('test result: ok. 5 passed; 0 failed');
+    expect(history.some(item => item.toolError)).toBe(true);
   });
 });

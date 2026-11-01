@@ -146,12 +146,15 @@ export {
 } from './tools/timeout.js';
 export type { TimeoutToolResult } from './tools/timeout.js';
 export { runSubTask, setAgentConfig, getAgentConfig } from './tools/agent.js';
-export type { SubTaskResult, SubTaskStatus } from './tools/agent.js';
+export type { SubTaskProgress, SubTaskResult, SubTaskStatus } from './tools/agent.js';
 export { setActiveModel, getActiveModel } from './tools/web-search.js';
 export { getTodos, clearTodos } from './tools/todo.js';
 export type { TodoItem, TodoStatus } from './tools/todo.js';
+export { getTaskProgress, clearTaskProgress } from './tools/task-progress.js';
+export type { TaskProgressEvent, TaskProgressKind, TaskProgressStatus } from './tools/task-progress.js';
 export { getPlan, clearPlan } from './tools/plan.js';
 export type { PlanItem, PlanStatus } from './tools/plan.js';
+export { registerExitPlanModeTool, unregisterExitPlanModeTool } from './tools/exit-plan-mode.js';
 export { GOAL_COMPLETE_TOOL, registerGoalComplete, unregisterGoalComplete } from './tools/goal.js';
 export { savePlan, renderPlanMarkdown, sanitizePlanTitle } from './plans.js';
 export type { PlanSaveMeta, SavedPlan } from './plans.js';

@@ -32,6 +32,21 @@ export interface InputEvent {
   key: ExpandedKey;
 }
 
+/**
+ * Keep the input text local to InputBox for ordinary single-line typing.
+ * The shared app state only needs updates when slash suggestions or layout change.
+ */
+export function shouldSyncInputValue(
+  value: string,
+  hasSlashSuggestions: boolean,
+  layoutChanged = false,
+): boolean {
+  const isSlashQuery = value.startsWith('/') && !/\s/.test(value);
+  return isSlashQuery
+    || hasSlashSuggestions
+    || layoutChanged;
+}
+
 /** 粘贴文本归一化：CRLF/LF 统一为 LF，去掉末尾换行（剪贴板常见残留） */
 export function normalizePastedText(text: string): string {
   return text

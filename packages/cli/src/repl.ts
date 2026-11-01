@@ -43,7 +43,11 @@ import {
   formatApiError,
   registerGoalComplete,
   unregisterGoalComplete,
+  registerExitPlanModeTool,
+  unregisterExitPlanModeTool,
   getSessionCost,
+  getTodos,
+  getPlan,
   consumePendingInjections,
   abortAllBackgroundTasks,
   isHighRiskCommand,
@@ -62,10 +66,12 @@ import {
 import { routeModelSticky, getModelContextWindow, getEffectiveModel, consumeRouteDegradedNotice, findFailoverTarget, isVisionModel } from './router.js';
 import { attachInputImages } from './image-input.js';
 import { isPlanBlocked, isPlanShellBlocked, getMode } from './mode.js';
+import { ProgressCheck, PROGRESS_CHECK_MESSAGE } from './progress-check.js';
+import { shellActivities, type ShellActivityEvent } from './shell-activity.js';
 import type { PermissionConfig, PermissionMode } from '@shenlan/core';
 import { buildFileChange } from './file-change.js';
 import type { FileChange } from './file-change.js';
-import { approvalLanguage, commandGrant, commandMatchesGrant, type CommandGrant } from './approval-policy.js';
+import { approvalLanguage, commandGrant, commandMatchesGrant, isAutoAllowedReadOnlyCommand, type CommandGrant } from './approval-policy.js';
 import {
   computeToolSig,
   RepeatTracker,
@@ -107,10 +113,11 @@ export function resetCompressionState(): void {
 }
 
 export interface AgentCallbacks {
+  onShellActivity?: (event: ShellActivityEvent) => void;
   onToken: (token: string) => void;
   onThinkingStart?: () => void;
   onThinkingEnd?: () => void;
-  onToolStart: (id: string, name: string, detail: string) => void;
+  onToolStart: (id: string, name: string, detail: string, shellCommand?: string) => void;
   onToolDone: (id: string, name: string, detail: string, resultContent?: string, fileChange?: FileChange) => void;
   onToolError: (id: string, name: string, error: string) => void;
   onConfirm: (info: ConfirmRequestInfo) => Promise<string>;
@@ -127,7 +134,7 @@ export interface AgentCallbacks {
 export interface ConfirmRequestInfo {
   toolName: string;
   description: string;
-  kind: 'edit' | 'create' | 'external' | 'destructive' | 'command' | 'high-risk';
+  kind: 'edit' | 'create' | 'external' | 'destructive' | 'command' | 'high-risk' | 'plan';
   language: Lang;
   /** 文件操作涉及的文件绝对路径（write/edit） */
   paths: string[];
@@ -327,7 +334,8 @@ function buildConfirmInfo(toolName: string, args: Record<string, unknown>, langu
   const paths = filePath ? [resolve(process.cwd(), expandHome(filePath))] : [];
   const grant = toolName === 'shell' ? commandGrant(command) : undefined;
   const annotations = getTool(toolName)?.annotations;
-  const kind = toolName === 'shell' ? 'command'
+  const kind = toolName === 'exit_plan_mode' ? 'plan'
+    : toolName === 'shell' ? 'command'
     : toolName === 'write' && filePath && !existsSync(paths[0]!) ? 'create'
     : toolName === 'write' || toolName === 'edit' ? 'edit'
     : annotations?.destructiveHint ? 'destructive' : 'external';
@@ -472,6 +480,8 @@ function needsManualConfirm(
   args: Record<string, unknown>,
   config: ShenlanConfig,
 ): boolean {
+  // Leaving Plan always requires an explicit choice, regardless of permission grants.
+  if (toolName === 'exit_plan_mode') return true;
   const annotations = getTool(toolName)?.annotations;
   if (toolName.startsWith('mcp__') && annotations?.destructiveHint) return true;
   if (!needsConfirmation(toolName, effectivePermissions(config), annotations)) return false;
@@ -484,6 +494,8 @@ function needsManualConfirm(
   }
   if (toolName === 'shell') {
     const command = String(args.command || '');
+    if (isAutoAllowedReadOnlyCommand(command)) return false;
+    if (getMode() === 'plan' && isPlanShellBlocked(command, config) === null) return false;
     if (sessionAllowedCommands.some(grant => commandMatchesGrant(command, grant))) return false;
   }
   return true;
@@ -500,9 +512,14 @@ function permissionsForToolCall(
   const filePath = typeof args.file_path === 'string' ? args.file_path : '';
   const resolvedPath = filePath ? resolve(process.cwd(), expandHome(filePath)) : '';
   const shellCommand = toolName === 'shell' ? String(args.command || '') : '';
+  const planReadonlyAllowed = toolName === 'shell'
+    && getMode() === 'plan'
+    && isPlanShellBlocked(shellCommand, config) === null;
   const grantedForSession = sessionAllow.has(toolName)
     || (['write', 'edit'].includes(toolName) && !!resolvedPath && sessionAllowedPaths.has(resolvedPath))
-    || (toolName === 'shell' && sessionAllowedCommands.some(grant => commandMatchesGrant(shellCommand, grant)));
+    || planReadonlyAllowed
+    || (toolName === 'shell' && (isAutoAllowedReadOnlyCommand(shellCommand)
+      || sessionAllowedCommands.some(grant => commandMatchesGrant(shellCommand, grant))));
   const allow = approvedThisCall || grantedForSession
     ? [...new Set([...permissions.allow, toolName])]
     : permissions.allow;
@@ -512,10 +529,11 @@ function permissionsForToolCall(
   return { ...permissions, allow, deny };
 }
 
-function getToolDetail(toolName: string, argsStr: string): string {
+export function getToolDetail(toolName: string, argsStr: string): string {
   try {
     const args = JSON.parse(argsStr || '{}');
-    if (toolName === 'shell' && args.command) return args.command.slice(0, 100);
+    if (toolName === 'agent' && args.goal) return String(args.goal).slice(0, 80);
+    if (toolName === 'shell' && args.command) return String(args.command).slice(0, 100);
     if (args.file_path) return args.file_path.slice(0, 80);
     if (args.pattern) return args.pattern.slice(0, 60);
     if (args.query) return args.query.slice(0, 80);
@@ -717,6 +735,8 @@ export async function runAgentLoop(
   // goal_complete 工具仅在 goal 模式注册进工具列表；非 goal 模式确保卸载
   if (goalMode) registerGoalComplete();
   else unregisterGoalComplete();
+  if (getMode() === 'plan') registerExitPlanModeTool();
+  else unregisterExitPlanModeTool();
 
   const tools = getAvailableTools(config);
   // 会话级模型粘性：本会话首个路由结果在后续轮次沿用（/model 切换时重置）
@@ -727,7 +747,8 @@ export async function runAgentLoop(
   // 图片降级路由提示（只提示一次）
   const degradedNotice = consumeRouteDegradedNotice();
   if (degradedNotice) callbacks.onNotice?.(degradedNotice);
-  const maxSteps = goalMode ? (config.agent?.goalMaxSteps ?? 300) : (config.agent?.maxSteps ?? 80);
+  // 交互式普通任务与 /goal 均持续运行到模型完成、用户中断或安全检测停止。
+  // agent.maxSteps 只保留给 headless run；交互式长任务依赖自动压缩和显式安全护栏。
   const compactLimit = getCompactLimit(config, stickyModel);
   const keepRecentTurns = config.context?.keepRecentTurns ?? 20;
   const toolOutputLimitChars = config.context?.toolOutputLimitChars ?? 8000;
@@ -752,6 +773,12 @@ export async function runAgentLoop(
 
   /** 空回复兜底：同一轮运行内只自动重试一次 */
   let emptyReplyRetried = false;
+  let planHandoffRequested = false;
+  const progressCheck = new ProgressCheck({
+    todo_write: getTodos().some(item => item.status !== 'completed'),
+    update_plan: getPlan().some(item => item.status !== 'completed'),
+  });
+  const backgroundActivities = new Map<string, import('./shell-activity.js').ShellActivity[]>();
   /** 截断升级值（finish_reason=length 时逐级抬高输出预算，上限为模型 cap） */
   let maxTokensOverride: number | undefined;
   /** 截断续写次数（有正文但被 length 截断时，追加“继续”让它接着写） */
@@ -795,7 +822,7 @@ export async function runAgentLoop(
     return result;
   };
 
-  for (let round = 0; round < maxSteps; round++) {
+  for (let round = 0; ; round++) {
     globalRound++;
 
     // Abort signal
@@ -1062,6 +1089,22 @@ export async function runAgentLoop(
     if (content) lastContent = content;
 
     if (toolCalls.length === 0) {
+      // Models can finish a plan in prose without calling exit_plan_mode.
+      // Offer the same explicit handoff instead of silently ending the Plan turn.
+      if (getMode() === 'plan' && content && !planHandoffRequested) {
+        planHandoffRequested = true;
+        const decision = await callbacks.onConfirm(buildConfirmInfo('exit_plan_mode', {}, confirmLanguage));
+        if (decision === 'abort') {
+          callbacks.onError(new Error('Stopped'));
+          return;
+        }
+        if (decision.startsWith('allow') && getMode() !== 'plan') {
+          messages.push({ role: 'user', content: 'Implement the plan using the permission mode I selected.' });
+          continue;
+        }
+        callbacks.onComplete(usage);
+        return;
+      }
       // goal 模式：无工具调用不结束，自动注入「继续执行」消息续跑
       if (goalMode && !goalAchieved) {
         messages.push({ role: 'user', content: '继续执行当前目标；若已完成请调用 goal_complete(reason)。' });
@@ -1104,7 +1147,12 @@ export async function runAgentLoop(
       }
 
       const detail = getToolDetail(toolName, tc.function.arguments);
-      callbacks.onToolStart(tc.id, toolName, detail);
+      callbacks.onToolStart(
+        tc.id,
+        toolName,
+        detail,
+        toolName === 'shell' ? String(args.command || '') : undefined,
+      );
 
       if (!tool) {
         const result = await executeToolCall(toolName, rawArgs, {
@@ -1196,6 +1244,7 @@ export async function runAgentLoop(
         needsManualConfirm(toolName, args, config)
       ) {
         const confirmInfo = buildConfirmInfo(toolName, args, confirmLanguage);
+        if (toolName === 'exit_plan_mode') planHandoffRequested = true;
         const result = await callbacks.onConfirm(confirmInfo);
 
         // 用户终止任务：清理未完成的 tool_calls，停止整个 agent 循环
@@ -1294,14 +1343,23 @@ export async function runAgentLoop(
         } catch { /* 安全保险：判定失败按“不存在”处理，不影响工具执行 */ }
       }
 
+      const activities = toolName === 'shell' ? shellActivities(String(args.command || ''))
+        : toolName === 'shell_status' ? backgroundActivities.get(String(args.id || '')) ?? [] : [];
       try {
         const sig = computeToolSig(toolName, tc.function.arguments);
+        if (activities.length && toolName === 'shell') callbacks.onShellActivity?.({ id: tc.id, activities, phase: 'started' });
         const result = await executeToolCall(toolName, rawArgs, {
           permissions: permissionsForToolCall(toolName, args, config, approvedThisCall),
           cwd: process.cwd(),
           auditEnabled: config.actionSafety?.auditEnabled,
           signal,
           approve: approvedThisCall ? async () => true : undefined,
+        });
+        const backgroundId = result.content.match(/still running in the background \(id: (bg-[^)]+)\)/)?.[1];
+        if (backgroundId && activities.length) backgroundActivities.set(backgroundId, activities);
+        if (activities.length) callbacks.onShellActivity?.({
+          id: tc.id, activities, phase: 'finished', output: result.content,
+          failed: !!result.isError || result.status !== 'executed',
         });
         // 坑命中反馈：失败错误匹配已知 trigger → hits+1（§14 反馈闭环）
         recordPitfallHitOnError(result, config, callbacks);
@@ -1341,6 +1399,7 @@ export async function runAgentLoop(
           modelVision: isVisionModel(stickyModel),
         }));
 
+        progressCheck.observe(toolName, args, !result.isError && result.status === 'executed');
         if (result.isError) {
           callbacks.onToolError(tc.id, toolName, content);
         } else {
@@ -1358,12 +1417,19 @@ export async function runAgentLoop(
       } catch (err) {
         const sig = computeToolSig(toolName, tc.function.arguments);
         const errorMsg = `${(err as Error).message}`;
+        if (activities.length) callbacks.onShellActivity?.({
+          id: tc.id, activities, phase: 'finished', output: errorMsg, failed: true,
+        });
         if (outcomeTracker.changed(sig, false, errorMsg)) {
           toolResultChanged = true;
         }
         messages.push({ role: 'tool', content: errorMsg, tool_call_id: tc.id, name: toolName });
         callbacks.onToolError(tc.id, toolName, errorMsg);
       }
+    }
+
+    if (progressCheck.takeReminder()) {
+      messages.push({ role: 'user', content: PROGRESS_CHECK_MESSAGE });
     }
 
     // goal 模式：模型调用 goal_complete 即达成（下一轮无工具调用时收尾给出最终总结）
@@ -1406,7 +1472,4 @@ export async function runAgentLoop(
     refreshSystemMemoryIfChanged(messages, config);
   }
 
-  // 步数上限：不是错误，优雅收尾，上下文不丢，继续输入即续跑
-  callbacks.onNotice?.(goalMode ? '已达 goal 步数上限（goal 保持 active，/goal resume 继续）' : '已达步数上限，输入继续可接着跑');
-  callbacks.onComplete();
 }

@@ -101,6 +101,13 @@ describe('formatToolSummary', () => {
     expect(formatToolSummary('restore', '2026-08-01', 'restored 3 files', false))
       .toBe('restore 2026-08-01: restored 3 files');
   });
+
+  it('task_progress 保留阶段与结果，失败结果明确显示失败', () => {
+    expect(formatToolSummary('task_progress', '', 'Progress recorded: stage in_progress — Implementation', false))
+      .toBe('task_progress: Progress recorded: stage in_progress — Implementation');
+    expect(formatToolSummary('task_progress', '', 'Progress recorded: verification failed — Tests (2 failed)', false))
+      .toContain('verification failed');
+  });
 });
 
 describe('truncateWidth', () => {

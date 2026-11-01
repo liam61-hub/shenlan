@@ -201,6 +201,7 @@ function compactToolLine(content: string): string {
 export function renderMarkdown(md: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const lines = md.split('\n');
+  const numberedHeadings = autoNumberSectionHeadings(lines);
   let i = 0;
 
   // 跟踪是否在代码块内
@@ -288,19 +289,26 @@ export function renderMarkdown(md: string): React.ReactNode[] {
       continue;
     }
 
-    // 标题
-    const hMatch = line.match(/^(#{1,6})\s+(.+)/);
-    if (hMatch) {
-      const level = hMatch[1].length;
-      const text = hMatch[2];
+    const taskStatusLine = renderTaskStatusLine(line);
+    if (taskStatusLine) {
+      nodes.push(<React.Fragment key={`task-${i}`}>{taskStatusLine}</React.Fragment>);
+      continue;
+    }
+
+    // Markdown 标题及独立粗体行标题
+    const heading = parseHeading(line);
+    if (heading) {
+      const { level, text } = heading;
       // 标题在上一行非空时前加 1 空行（适度留白）
       const headingNodes: React.ReactNode[] = [];
       if (i > 0 && lines[i - 1].trim() !== '') {
         headingNodes.push(<Box key={`hblank-${i}`} height={1} />);
       }
       headingNodes.push(
-        <Text key={`h-${i}`} bold color={level <= 2 ? 'white' : undefined}>
-          {renderImportantText(level <= 2 ? text : '  ' + text)}
+        <Text key={`h-${i}`} bold color={level <= 2 ? 'white' : 'cyan'}>
+          {numberedHeadings.has(i) ? <Text color="cyan">{numberedHeadings.get(i)}. </Text> : null}
+          <Text color={level <= 2 ? 'magenta' : 'cyan'}>◆ </Text>
+          {renderImportantText(text)}
         </Text>
       );
       nodes.push(...headingNodes);
@@ -336,13 +344,9 @@ export function renderMarkdown(md: string): React.ReactNode[] {
     }
 
     // 有序列表
-    const olMatch = line.match(/^(\s*)(\d+)\.\s+(.+)/);
-    if (olMatch) {
-      nodes.push(
-        <Text key={`ol-${i}`}>
-          {olMatch[1]}{olMatch[2]}. {renderInlineMd(olMatch[3])}
-        </Text>
-      );
+    const orderedListLine = renderOrderedListLine(line);
+    if (orderedListLine) {
+      nodes.push(<React.Fragment key={`ol-${i}`}>{orderedListLine}</React.Fragment>);
       continue;
     }
 
@@ -385,6 +389,42 @@ export function renderMarkdown(md: string): React.ReactNode[] {
   return nodes;
 }
 
+interface ParsedHeading {
+  level: number;
+  text: string;
+}
+
+function parseHeading(line: string): ParsedHeading | null {
+  const markdown = line.match(/^\s*(#{1,6})\s+(.+?)\s*#*\s*$/);
+  if (markdown) return { level: markdown[1].length, text: stripHeadingEmphasis(markdown[2]) };
+  const bold = line.match(/^\s*\*\*(.+?)\*\*\s*$/);
+  return bold ? { level: 2, text: bold[1] } : null;
+}
+
+function stripHeadingEmphasis(text: string): string {
+  const bold = text.match(/^\*\*(.+)\*\*$/);
+  return bold ? bold[1] : text;
+}
+
+/** Number only substantial sibling section groups; leave document titles and short groups alone. */
+function autoNumberSectionHeadings(lines: string[]): Map<number, number> {
+  const groups = new Map<number, Array<{ line: number; text: string }>>();
+  lines.forEach((line, index) => {
+    const heading = parseHeading(line);
+    if (!heading || heading.level === 1) return;
+    const group = groups.get(heading.level) ?? [];
+    group.push({ line: index, text: heading.text });
+    groups.set(heading.level, group);
+  });
+
+  const numbered = new Map<number, number>();
+  for (const group of groups.values()) {
+    if (group.length < 3 || group.some(({ text }) => /^\s*\d+[.)、]\s/.test(text))) continue;
+    group.forEach(({ line }, index) => numbered.set(line, index + 1));
+  }
+  return numbered;
+}
+
 /**
  * 行内 markdown 渲染（返回 React node）
  * 供完成态 MessageItem 与流式 StreamingLine 共用。
@@ -414,6 +454,54 @@ export function renderInlineMd(text: string): React.ReactNode {
 }
 
 const IMPORTANT_KEYWORDS = /\[(?:✓|✔|x|X)\]|\[→\]|\[\s\]|☑|☐|\b[A-Z]-\d+\b|\b(?:main|master)\b|\b(?:error|failure|failed|warning|caution|success|completed|critical|important)\b|全绿|错误|失败|警告|注意|成功|完成|重要|关键|风险|必须|禁止|\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\b|\bHTTP\/\d(?:\.\d)?\b|\bRFC\s+\d+\b/giu;
+
+/** Render a complete checklist row with a status-specific color, including raw `[→]` rows. */
+export function renderTaskStatusLine(text: string): React.ReactNode | null {
+  const match = text.match(/^(\s*(?:[-*]\s+)?)(\[(?:→|✓|✔|x|X| )\])(\s+)(.+)$/);
+  if (!match) return null;
+  const [, prefix, marker, gap, body] = match;
+  const pending = marker === '[ ]';
+  const displayMarker = marker === '[→]' ? marker : pending ? '☐' : '☑';
+  const color = marker === '[→]' ? 'yellow' : pending ? undefined : 'green';
+  return (
+    <Text color={color} dimColor={pending}>
+      <Text bold>{prefix}{displayMarker}</Text>{gap}{renderInlineMd(body)}
+    </Text>
+  );
+}
+
+/** Render numbered list titles in cyan while keeping explanatory sentences in body color. */
+export function renderOrderedListLine(text: string): React.ReactNode | null {
+  const match = text.match(/^(\s*)(\d+)\.\s+(.+)$/);
+  if (!match) return null;
+  const [, indent, number, content] = match;
+  const title = splitOrderedListTitle(content);
+  const titleColor = title && /^\*\*.+\*\*$/.test(title[0].trim()) ? 'yellow' : 'cyan';
+  return (
+    <Text>
+      {indent}<Text color="cyan" bold>{number}.</Text>{' '}
+      {title
+        ? <><Text color={titleColor} bold>{renderInlineMd(title[0])}</Text>{renderInlineMd(title[1])}</>
+        : renderInlineMd(content)}
+    </Text>
+  );
+}
+
+function splitOrderedListTitle(content: string): [string, string] | null {
+  // A colon inside a fully emphasized list title is part of the title, not a split point.
+  if (/^\*\*.+\*\*$/.test(content.trim())) return [content, ''];
+  const colon = content.search(/[:：]/);
+  if (colon >= 3 && displayWidth(content.slice(0, colon)) <= 40) {
+    return [content.slice(0, colon + 1), content.slice(colon + 1)];
+  }
+  if (
+    displayWidth(content) <= 48
+    && !/[。！？!?；;](?:[”’"')\]]*)$/.test(content.trim())
+  ) {
+    return [content, ''];
+  }
+  return null;
+}
 
 function renderImportantText(text: string): React.ReactNode {
   const nodes: React.ReactNode[] = [];

@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import type { ShenlanConfig } from '@shenlan/core';
-import { isPlanShellBlocked, isPlanBlocked, setMode } from '../mode.js';
+import { isPlanShellBlocked, isPlanBlocked, setMode, cycleMode } from '../mode.js';
 
 const baseConfig: ShenlanConfig = {
   model: { baseUrl: '', apiKey: '', model: 'deepseek-v4-flash', maxTokens: 8192 },
@@ -14,7 +14,7 @@ const baseConfig: ShenlanConfig = {
 
 const cfg = {
   ...baseConfig,
-  planMode: { readonlyCommands: ['git status', 'git diff', 'ls'] },
+  planMode: { readonlyCommands: ['git status', 'git diff', 'git rev-parse', 'node --version', 'ls'] },
 };
 
 describe('isPlanShellBlocked — plan 态 shell 白名单', () => {
@@ -31,6 +31,14 @@ describe('isPlanShellBlocked — plan 态 shell 白名单', () => {
     expect(isPlanShellBlocked('git status', cfg)).toBeNull();
     expect(isPlanShellBlocked('git diff HEAD~1', cfg)).toBeNull();
     expect(isPlanShellBlocked('ls -la', cfg)).toBeNull();
+    expect(isPlanShellBlocked('git rev-parse --show-toplevel', cfg)).toBeNull();
+    expect(isPlanShellBlocked('node --version', cfg)).toBeNull();
+  });
+
+  it('拒绝通过只读白名单前缀串联其它 shell 操作', () => {
+    setMode('plan');
+    expect(isPlanShellBlocked('git status && echo unsafe', cfg)).toContain('compound');
+    expect(isPlanShellBlocked('git status > result.txt', cfg)).toContain('compound');
   });
 
   it('未命中白名单的命令一律拒绝', () => {
@@ -71,5 +79,17 @@ describe('isPlanBlocked — 工具级拦截', () => {
     setMode('default');
     expect(isPlanBlocked('write')).toBe(false);
     expect(isPlanBlocked('shell')).toBe(false);
+  });
+});
+
+describe('cycleMode', () => {
+  afterEach(() => { setMode('default'); });
+
+  it('cycles through Plan before Bypass', () => {
+    setMode('default');
+    expect(cycleMode()).toBe('acceptEdits');
+    expect(cycleMode()).toBe('plan');
+    expect(cycleMode()).toBe('bypassPermissions');
+    expect(cycleMode()).toBe('default');
   });
 });

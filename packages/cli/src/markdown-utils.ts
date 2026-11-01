@@ -358,12 +358,20 @@ export function tableColumnWidths(header: string[], rows: string[][], maxWidth: 
   let sum = widths.reduce((a, b) => a + b, 0);
   if (sum > available) {
     const scale = available / sum;
-    for (let c = 0; c < colCount; c++) widths[c] = Math.max(1, Math.floor(widths[c] * scale));
+    // Preserve a readable share for every populated column before giving the
+    // remaining space to columns with more content. Purely proportional
+    // shrinking can collapse short labels to a few characters when the last
+    // column contains a long explanation.
+    const minimums = widths.map(width => Math.min(width, Math.max(1, Math.floor(available / colCount))));
+    for (let c = 0; c < colCount; c++) widths[c] = Math.max(minimums[c], Math.floor(widths[c] * scale));
     sum = widths.reduce((a, b) => a + b, 0);
     while (sum > available) {
-      let maxIdx = 0;
-      for (let c = 1; c < colCount; c++) if (widths[c] > widths[maxIdx]) maxIdx = c;
-      if (widths[maxIdx] <= 1) break;
+      let maxIdx = -1;
+      for (let c = 0; c < colCount; c++) {
+        if (widths[c] <= minimums[c]) continue;
+        if (maxIdx === -1 || widths[c] - minimums[c] > widths[maxIdx] - minimums[maxIdx]) maxIdx = c;
+      }
+      if (maxIdx === -1) break;
       widths[maxIdx]--;
       sum--;
     }

@@ -96,6 +96,22 @@ describe('表格', () => {
     expect(narrow.every(w => w >= 1)).toBe(true);
   });
 
+  it('长说明表格不会挤扁编号旁的任务列', () => {
+    const header = ['#', '任务', '现状 / 依据'];
+    const rows = [[
+      '1',
+      '修反代并发 keep-alive 连接池 bug',
+      'wrk 并发请求出现 read/write error；串行探测正常。候选原因包括连接池争用、误复用已关闭连接和归还时机。',
+    ]];
+    const maxWidth = 75;
+    const widths = tableColumnWidths(header, rows, maxWidth);
+    const available = maxWidth - 2 * (header.length - 1);
+
+    expect(widths[0]).toBe(1);
+    expect(widths[1]).toBeGreaterThanOrEqual(Math.floor(available / header.length));
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBeLessThanOrEqual(available);
+  });
+
   it('padCell 按纯文本宽度填充（不含 markdown 符号）', () => {
     expect(padCell('**天气**', 4)).toBe('**天气**');
     expect(padCell('a', 3)).toBe('a  ');

@@ -1,9 +1,12 @@
 {
   "name": "shenlan",
-  "version": "0.4.90",
+  "version": "0.5.0",
   "private": true,
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/liam61-hub/shenlan.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liam61-hub/shenlan.git"
+  },
   "description": "深蓝（shenlan）—— 自建 Agent Harness CLI",
   "workspaces": [
     "packages/*"

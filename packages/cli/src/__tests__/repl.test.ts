@@ -3,6 +3,7 @@ import type { Message, ShenlanConfig, StreamCallbacks } from '@shenlan/core';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getToolDetail } from '../repl.js';
 
 // repl.ts 依赖的 core 模块：mock 掉网络与工具执行，其余保留真实实现
 vi.mock('@shenlan/core', async (importOriginal) => {
@@ -95,6 +96,17 @@ function harness() {
   return { events, callbacks };
 }
 
+describe('getToolDetail', () => {
+  it('agent 运行状态显示 goal，避免 spinner 只显示工具名', () => {
+    expect(getToolDetail('agent', JSON.stringify({ goal: '审计协议安全', task: '检查 Rust HTTP parser' })))
+      .toBe('审计协议安全');
+  });
+
+  it('agent goal 遵守状态行宽度限制', () => {
+    expect(getToolDetail('agent', JSON.stringify({ goal: 'x'.repeat(100) }))).toHaveLength(80);
+  });
+});
+
 describe('runAgentLoop — 步数护栏', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -121,9 +133,9 @@ describe('runAgentLoop — 步数护栏', () => {
     expect(vi.mocked(chatStream)).toHaveBeenCalledTimes(36);
   });
 
-  it('命中步数上限时优雅收尾（onComplete + 通知，可继续输入续跑）', async () => {
+  it('普通交互任务超过 headless 步数配置后继续运行并自动收尾', async () => {
     const same = () => toolCallMsg('{"file_path":"a.txt"}');
-    installChatScript([same, same, same]);
+    installChatScript([same, same, same, () => textMsg('完成')]);
     const messages: Message[] = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: '任务' },
@@ -133,8 +145,9 @@ describe('runAgentLoop — 步数护栏', () => {
 
     expect(events.filter(e => e.kind === 'error')).toEqual([]);
     const notices = events.filter(e => e.kind === 'notice').map(e => e.detail || '');
-    expect(notices.some(n => n.includes('已达步数上限，输入继续可接着跑'))).toBe(true);
+    expect(notices.some(n => n.includes('已达步数上限'))).toBe(false);
     expect(events.some(e => e.kind === 'complete')).toBe(true);
+    expect(vi.mocked(chatStream)).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -489,22 +502,24 @@ describe('runAgentLoop — /goal 长任务模式', () => {
 
   const goalParam = { text: '把全部测试跑绿', status: 'active' as const };
 
-  it('无工具调用轮不结束：注入「继续执行」消息续跑，直到步数上限收尾', async () => {
+  it('goal 模式忽略旧步数上限，自动压缩/续跑直至目标完成', async () => {
     installChatScript([
       () => textMsg('我先看一下测试状态'),
       () => textMsg('继续推进中...'),
+      () => toolCallMsg('{"reason":"目标步骤已完成"}', 'goal_complete', 'g1'),
+      () => textMsg('目标已完成。'),
     ]);
     const messages: Message[] = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: '把全部测试跑绿' },
     ];
     const { events, callbacks } = harness();
-    await runAgentLoop('', { ...baseConfig, agent: { maxSteps: 80, goalMaxSteps: 3 } }, messages, callbacks, undefined, goalParam);
+    await runAgentLoop('', { ...baseConfig, agent: { maxSteps: 1, goalMaxSteps: 1 } }, messages, callbacks, undefined, goalParam);
 
-    // 纯文本轮不会结束：goalMaxSteps=3 → 3 次调用后优雅收尾（goal 保持 active）
-    expect(vi.mocked(chatStream)).toHaveBeenCalledTimes(3);
+    // 两次纯文本续跑 + goal_complete + 最终总结，超过遗留步数配置后正常完成
+    expect(vi.mocked(chatStream)).toHaveBeenCalledTimes(4);
     expect(events.some(e => e.kind === 'complete')).toBe(true);
-    expect(events.some(e => e.kind === 'notice' && (e.detail || '').includes('goal 步数上限'))).toBe(true);
+    expect(events.some(e => e.kind === 'notice' && (e.detail || '').includes('目标已完成'))).toBe(true);
     // 续跑消息已注入
     const continueMsg = messages.find(m => m.role === 'user' && messageTextOf(m).includes('继续执行当前目标'));
     expect(continueMsg).toBeDefined();
@@ -523,7 +538,7 @@ describe('runAgentLoop — /goal 长任务模式', () => {
       { role: 'user', content: '把全部测试跑绿' },
     ];
     const { events, callbacks } = harness();
-    await runAgentLoop('', { ...baseConfig, agent: { maxSteps: 80, goalMaxSteps: 300 } }, messages, callbacks, undefined, goalParam);
+    await runAgentLoop('', { ...baseConfig, agent: { maxSteps: 80 } }, messages, callbacks, undefined, goalParam);
 
     expect(events.some(e => e.kind === 'notice' && (e.detail || '').includes('目标已完成'))).toBe(true);
     expect(events.some(e => e.kind === 'complete')).toBe(true);
@@ -539,7 +554,7 @@ describe('runAgentLoop — /goal 长任务模式', () => {
       { role: 'user', content: '目标' },
     ];
     const { events, callbacks } = harness();
-    await runAgentLoop('', { ...baseConfig, agent: { maxSteps: 80, goalMaxSteps: 300 } }, messages, callbacks, undefined, goalParam);
+    await runAgentLoop('', { ...baseConfig, agent: { maxSteps: 80 } }, messages, callbacks, undefined, goalParam);
 
     const notices = events.filter(e => e.kind === 'notice').map(e => e.detail || '');
     expect(notices.some(n => n.includes('连续 3 轮无进展'))).toBe(true);
@@ -702,4 +717,86 @@ describe('runAgentLoop — 空回复兜底', () => {
     expect(assistantTexts).toContain('前半段内容');
     expect(events.some(e => e.kind === 'complete')).toBe(true);
   });
+});
+
+describe('checklist reconciliation in the agent loop', () => {
+  it('sends a reminder to the next model round after a stage transition', async () => {
+    vi.clearAllMocks();
+    resetStop();
+    resetSessionSticky();
+    resetCompressionState();
+    setMode('bypassPermissions');
+    installChatScript([
+      () => toolCallMsg(JSON.stringify({ plan: [{ step: 'first', status: 'in_progress' }] }), 'update_plan', 'plan'),
+      () => toolCallMsg(JSON.stringify({ kind: 'stage', status: 'completed', title: 'first' }), 'task_progress', 'stage'),
+      () => textMsg('Done'),
+    ]);
+    const messages: Message[] = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'work' }];
+    const { events, callbacks } = harness();
+    await runAgentLoop('', baseConfig, messages, callbacks);
+    const reminders = messages.filter(message => message.role === 'user' && String(message.content).startsWith('[Progress check]'));
+    expect(reminders).toHaveLength(1);
+    expect(events.some(event => event.kind === 'complete')).toBe(true);
+  });
+});
+
+describe('shell lifecycle reporting', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetStop();
+    resetSessionSticky();
+    resetCompressionState();
+    setMode('bypassPermissions');
+  });
+
+  it('reports start and the full commit result before normal tool completion', async () => {
+    installChatScript([() => toolCallMsg(JSON.stringify({ command: 'git commit -m fix' }), 'shell', 'commit')]);
+    vi.mocked(executeToolCall).mockResolvedValueOnce({
+      status: 'executed', isError: false,
+      content: 'Scan passed\n[main f3714bc] test: cover try_files\n 1 file changed, 156 insertions(+)',
+    });
+    const { callbacks } = harness();
+    const order: string[] = [];
+    callbacks.onShellActivity = event => {
+      order.push(event.phase);
+      if (event.phase === 'started') expect(executeToolCall).not.toHaveBeenCalled();
+      else expect(event.output).toContain('[main f3714bc]');
+    };
+    callbacks.onToolDone = () => { order.push('done'); };
+    await runAgentLoop('', baseConfig, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'work' }], callbacks);
+    expect(order).toEqual(['started', 'finished', 'done']);
+  });
+
+  it('reports failure without requiring a model progress tool', async () => {
+    installChatScript([() => toolCallMsg(JSON.stringify({ command: 'cargo test' }), 'shell', 'tests')]);
+    vi.mocked(executeToolCall).mockResolvedValueOnce({ status: 'executed', isError: true,
+      content: 'Command exited with code 101\ntest result: FAILED. 4 passed; 1 failed' });
+    const { callbacks } = harness();
+    const onShellActivity = vi.fn();
+    callbacks.onShellActivity = onShellActivity;
+    await runAgentLoop('', baseConfig, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'work' }], callbacks);
+    expect(onShellActivity).toHaveBeenCalledTimes(2);
+    expect(onShellActivity.mock.calls[1][0]).toMatchObject({ phase: 'finished', failed: true });
+  });
+});
+
+it('preserves the final test summary when polling a background check', async () => {
+  vi.clearAllMocks();
+  resetStop(); resetSessionSticky(); resetCompressionState(); setMode('bypassPermissions');
+  installChatScript([
+    () => toolCallMsg(JSON.stringify({ command: 'cargo test' }), 'shell', 'background'),
+    () => toolCallMsg(JSON.stringify({ id: 'bg-tests' }), 'shell_status', 'poll'),
+  ]);
+  vi.mocked(executeToolCall)
+    .mockResolvedValueOnce({ status: 'executed', isError: true,
+      content: 'Command timed out after 120 seconds — still running in the background (id: bg-tests).' })
+    .mockResolvedValueOnce({ status: 'executed', isError: false,
+      content: '[bg-tests] completed (exit 0) — 140s elapsed — cargo test\ntest result: ok. 5 passed; 0 failed' });
+  const { callbacks } = harness();
+  const onShellActivity = vi.fn();
+  callbacks.onShellActivity = onShellActivity;
+  await runAgentLoop('', baseConfig, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'work' }], callbacks);
+  expect(onShellActivity).toHaveBeenCalledTimes(3);
+  expect(onShellActivity.mock.calls[2][0]).toMatchObject({ id: 'poll', phase: 'finished', activities: [{ label: 'cargo test' }] });
+  expect(onShellActivity.mock.calls[2][0].output).toContain('5 passed');
 });

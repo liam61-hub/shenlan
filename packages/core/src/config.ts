@@ -51,9 +51,9 @@ export interface PermissionConfig {
 
 /** Agent 循环护栏配置 */
 export interface AgentConfig {
-  /** 单次任务最大步数（命中后优雅收尾，可继续输入续跑） */
+  /** headless 单次任务最大步数；交互式任务由模型收尾或用户中断 */
   maxSteps: number;
-  /** /goal 长任务模式最大步数（默认 300；无工具调用轮自动续跑） */
+  /** @deprecated Legacy compatibility field; interactive goal runs are no longer step-limited. */
   goalMaxSteps?: number;
   /** 后台 Explore agent（background_agent）并发上限（默认 3；超限报错不排队） */
   maxBackground?: number;
@@ -482,7 +482,6 @@ export const DEFAULT_CONFIG: ShenlanConfig = {
   mcpServers: [],
   agent: {
     maxSteps: 80,
-    goalMaxSteps: 300,
     maxBackground: 3,
   },
   context: {
@@ -516,7 +515,10 @@ export const DEFAULT_CONFIG: ShenlanConfig = {
   planMode: {
     readonlyCommands: [
       'git status', 'git diff', 'git log', 'git show', 'git branch',
-      'ls', 'pwd', 'echo', 'cat',
+      'git rev-parse', 'git diff --check', 'git diff --name-only',
+      'ls', 'pwd', 'echo', 'cat', 'head', 'tail', 'wc',
+      'whoami', 'hostname', 'which', 'where',
+      'node --version', 'npm --version', 'python --version',
     ],
   },
   pitfallMemory: {

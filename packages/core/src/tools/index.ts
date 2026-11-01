@@ -95,6 +95,7 @@ export async function registerAllTools(config?: ShenlanConfig): Promise<void> {
     import('./view-image.js'),
     import('./transcribe-media.js'),
     import('./todo.js'),
+    import('./task-progress.js'),
     import('./plan.js'),
     import('./memory.js'),
   ];

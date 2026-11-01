@@ -23,7 +23,7 @@ export function buildFrozenItems(state: AppState, version: string, termWidth = p
   ];
   for (const item of state.history) {
     if (item.role === 'tool-step' && item.toolStep) {
-      const { name, detail, outcome, durationMs } = item.toolStep;
+      const { name, detail, outcome, durationMs, runs = 1 } = item.toolStep;
       const elapsed = `${(durationMs / 1000).toFixed(1)}s`;
       items.push(
         <Box key={item.key} flexDirection="row">
@@ -34,7 +34,7 @@ export function buildFrozenItems(state: AppState, version: string, termWidth = p
           <Text> </Text>
           <Text bold>{name}</Text>
           {detail ? <Text dimColor> {detail}</Text> : null}
-          <Text dimColor> ({elapsed})</Text>
+          <Text dimColor> ({elapsed}{runs > 1 ? ` ×${runs}` : ''})</Text>
         </Box>,
       );
     } else if (item.role === 'assistant-line') {
@@ -42,7 +42,7 @@ export function buildFrozenItems(state: AppState, version: string, termWidth = p
         <StreamingLine key={item.key} text={item.content} code={item.code} termWidth={termWidth} />,
       );
     } else if (item.role === 'assistant-block') {
-      // 流式整块（表格/公式）：与 assistant 消息同款 │ 前缀，一次写入
+      // 流式整块（表格/公式）：与 assistant 消息同款缩进，一次写入
       items.push(
         <AssistantFrame key={item.key} termWidth={termWidth}>
           {item.blockKind === 'table'

@@ -83,3 +83,11 @@ describe('update_plan 工具', () => {
     expect(getPlan()).toEqual([]);
   });
 });
+
+it('preserves parent subtask labels for grouped plan items', async () => {
+  await getTool('update_plan')!.execute({ plan: [
+    { step: 'Develop cache integration', status: 'in_progress', group: ' S3 Performance ' },
+    { step: 'Verify A/B results', status: 'pending', group: 'S3 Performance' },
+  ] });
+  expect(getPlan().map(item => item.group)).toEqual(['S3 Performance', 'S3 Performance']);
+});

@@ -173,6 +173,30 @@ describe('appendToJsonl / flushSession / loadSession 往返', () => {
 });
 
 describe('syncSessionMessages（全量同步）', () => {
+  it('任务进度工具调用与结果随会话恢复并保留顺序', () => {
+    const session = createSession();
+    const progressMessages: Message[] = [
+      msg('user', '实现多阶段改动'),
+      {
+        role: 'assistant', content: null,
+        tool_calls: [{ id: 'progress-1', type: 'function', function: {
+          name: 'task_progress', arguments: JSON.stringify({ kind: 'stage', status: 'started', title: 'Implementation' }),
+        } }],
+      },
+      { role: 'tool', tool_call_id: 'progress-1', name: 'task_progress', content: 'Progress recorded: stage started — Implementation' },
+      {
+        role: 'assistant', content: null,
+        tool_calls: [{ id: 'progress-2', type: 'function', function: {
+          name: 'task_progress', arguments: JSON.stringify({ kind: 'verification', status: 'failed', title: 'Tests' }),
+        } }],
+      },
+      { role: 'tool', tool_call_id: 'progress-2', name: 'task_progress', content: 'Progress recorded: verification failed — Tests' },
+    ];
+    syncSessionMessages(session.id, progressMessages);
+
+    expect(loadSession(session.id)?.messages).toEqual(progressMessages);
+  });
+
   it('替换文件为当前消息，不残留缓冲旧消息', () => {
     const session = createSession();
     appendToJsonl(session, msg('user', '旧消息'));

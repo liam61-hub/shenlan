@@ -52,11 +52,13 @@ describe('buildConfirmOptions', () => {
     expect(opts[1].label).toContain('npm run build');
   });
 
-  it('plan：三个实施选项', () => {
+  it('plan：可选择实施权限模式、清空上下文或留在计划模式', () => {
     const opts = buildConfirmOptions('plan');
-    expect(opts.map(o => o.value)).toEqual(['allow', 'allow_clear', 'deny']);
-    expect(opts[0].label).toBe('Yes, implement this plan');
-    expect(opts[2].label).toBe('No, stay in Plan mode');
+    expect(opts.map(o => o.value)).toEqual(['allow', 'allow_edit', 'allow_bypass', 'allow_clear', 'deny']);
+    expect(opts[0].label).toBe('Switch to Normal and implement');
+    expect(opts[1].label).toContain('Accept Edits');
+    expect(opts[2].label).toContain('Bypass');
+    expect(opts[4].label).toBe('Stay in Plan mode');
   });
 
   it('中文动作类型对应不同选项，破坏性工具无会话授权', () => {
@@ -64,6 +66,6 @@ describe('buildConfirmOptions', () => {
     expect(buildConfirmTitle('edit', 'zh-CN')).toContain('修改');
     expect(buildConfirmOptions('external', {}, 'zh-CN').map(o => o.value)).toEqual(['allow', 'allow_session', 'feedback']);
     expect(buildConfirmOptions('destructive', {}, 'zh-CN').map(o => o.value)).toEqual(['allow', 'feedback']);
-    expect(buildConfirmOptions('plan', {}, 'zh-CN')[0].label).toBe('实施此计划');
+    expect(buildConfirmOptions('plan', {}, 'zh-CN')[0].label).toBe('切换到 Normal 并实施');
   });
 });

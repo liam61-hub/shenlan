@@ -29,6 +29,11 @@ export interface SubTaskResult {
   success: boolean;
 }
 
+export interface SubTaskProgress {
+  kind: 'started' | 'round' | 'tool' | 'stage';
+  title: string;
+}
+
 function subTaskResult(goal: string, summary: string, status: SubTaskStatus): SubTaskResult {
   return { goal, summary, status, success: status === 'completed' };
 }
@@ -56,9 +61,11 @@ export async function runSubTask(
   model: string,
   maxRounds: number = 20,
   signal?: AbortSignal,
+  onProgress?: (progress: SubTaskProgress) => void,
 ): Promise<SubTaskResult> {
   const startTime = Date.now();
   debugLog('Sub-agent — started', { goalLen: goal.length, taskLen: task.length, maxRounds });
+  onProgress?.({ kind: 'started', title: goal });
   const messages: Message[] = [];
   // Dynamic import to avoid circular dependency with context.ts
   const { buildSystemPrompt } = await import('../context.js');
@@ -66,7 +73,7 @@ export async function runSubTask(
   messages.push({ role: 'system', content: systemPrompt });
   messages.push({
     role: 'user',
-    content: `Complete this subtask independently and return a clear summary.\n\nGoal: ${goal}\n\nTask:\n${task}\n\nWork through this step by step. Use tools as needed. When done, provide a concise summary of findings.`,
+    content: `Complete this subtask independently and return a clear summary.\n\nGoal: ${goal}\n\nTask:\n${task}\n\nWork through this step by step. Use tools as needed. Use task_progress to report meaningful stages as started, in_progress, and completed, and report verification outcomes. When done, provide a concise summary of findings.`,
   });
 
   const toolDefs = getToolSchemas()
@@ -79,6 +86,7 @@ export async function runSubTask(
   let lastContent = '';
 
   for (let round = 0; round < maxRounds; round++) {
+    onProgress?.({ kind: 'round', title: `Round ${round + 1}` });
     // Check abort signal before each round
     if (signal?.aborted) {
       debugLog('Sub-agent — aborted', { goal, round, elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
@@ -149,6 +157,14 @@ export async function runSubTask(
 
       try {
         const args: unknown = JSON.parse(tc.function.arguments || '{}');
+        if (tc.function.name === 'task_progress' && args && typeof args === 'object') {
+          const progress = args as Record<string, unknown>;
+          if (progress.kind === 'stage' && typeof progress.title === 'string' && typeof progress.status === 'string') {
+            onProgress?.({ kind: 'stage', title: `${progress.title} (${progress.status})` });
+          }
+        } else {
+          onProgress?.({ kind: 'tool', title: tc.function.name });
+        }
         const result = await executeToolCall(tc.function.name, args, {
           permissions: config.permissions,
           cwd: process.cwd(),

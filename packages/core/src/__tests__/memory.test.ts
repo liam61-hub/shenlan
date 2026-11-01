@@ -171,6 +171,26 @@ describe('buildSystemPrompt 记忆注入', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  it('规定非查询任务最终总结的固定内容，并允许查询类任务简答', () => {
+    const prompt = buildSystemPrompt(cwd);
+    for (const required of [
+      'completed work',
+      'final line ranges',
+      'left unchanged, with the reason',
+      'verification commands and actual results',
+      'unresolved issues and material limitations',
+      'commit result',
+      'Query-only answers may stay brief',
+    ]) expect(prompt).toContain(required);
+  });
+
+  it('要求多步骤任务初始化并持续更新底部 todo_write 清单', () => {
+    const prompt = buildSystemPrompt(cwd);
+    expect(prompt).toContain('initialize the visible bottom checklist with `todo_write`');
+    expect(prompt).toContain('do not update this checklist');
+    expect(prompt).toContain('cannot replace `todo_write`');
+  });
+
   it('无 MEMORY.md 时回退旧 front-matter 全量注入', () => {
     const dir = projectMemoryDir(cwd);
     writeFileSync(

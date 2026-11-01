@@ -25,6 +25,10 @@ import type { FlushItem } from './stream-blocks.js';
 import type { RunMode } from './mode.js';
 import { initialModelSelection } from './commands/model.js';
 import { buildKeyProviders } from './keys.js';
+import { formatShellOutputChange } from './shell-summary.js';
+import { shellActivities, shellActivityLines } from './shell-activity.js';
+
+let systemMessageSequence = 0;
 
 interface AppProps {
   config: ShenlanConfig;
@@ -260,7 +264,9 @@ export function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         history: [...state.history, {
-          key: `system-${Date.now()}`,
+          // Parallel sub-agent callbacks can arrive within one millisecond.
+          // Static item keys must remain unique or React may drop/reuse rows.
+          key: `system-${Date.now()}-${++systemMessageSequence}`,
           role: 'system' as const,
           content: action.content,
           ts: Date.now(),
@@ -330,7 +336,8 @@ export function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         phase: 'tools',
-        toolStatuses: [...state.toolStatuses, {
+        toolStatuses: [...state.toolStatuses.filter(status => !status.grouped || status.state === 'running'), {
+          grouped: action.grouped,
           id: action.id,
           name: action.name,
           detail: action.detail,
@@ -341,7 +348,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'TOOL_DONE': {
-      return finalizeToolStep(state, action.id, 'done', action.detail);
+      return finalizeToolStep(state, action.id, 'done', action.detail, undefined, action.recordHistory !== false);
     }
 
     case 'TOOL_RESULT': {
@@ -355,6 +362,37 @@ export function reducer(state: AppState, action: AppAction): AppState {
           toolError: action.isError || undefined,
           fileChange: action.fileChange,
         }],
+      };
+    }
+
+    case 'TOOL_GROUP_RESULT': {
+      const ts = Date.now();
+      return {
+        ...state,
+        toolStatuses: state.toolStatuses.filter(status => !status.grouped || status.state === 'running'),
+        history: [
+          ...state.history,
+          {
+            key: `tool-group-step-${action.id}`,
+            role: 'tool-step' as const,
+            content: '',
+            toolStep: {
+              id: action.id,
+              name: action.name,
+              detail: action.detail,
+              outcome: action.outcome,
+              durationMs: action.durationMs,
+              runs: action.runs,
+            },
+          },
+          {
+            key: `tool-group-result-${action.id}`,
+            role: 'tool' as const,
+            content: action.content,
+            ts,
+            toolError: action.outcome === 'error' || undefined,
+          },
+        ],
       };
     }
 
@@ -380,11 +418,11 @@ export function reducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'TODOS': {
-      return { ...state, todos: action.todos };
+      return { ...state, todos: action.todos, taskListSource: 'todos' };
     }
 
     case 'PLAN': {
-      return { ...state, plan: action.plan };
+      return { ...state, plan: action.plan, taskListSource: 'plan' };
     }
 
     case 'CONFIRM_PROMPT': {
@@ -1104,6 +1142,7 @@ function finalizeToolStep(
   outcome: 'done' | 'error',
   detailOverride?: string,
   statusDetailOverride?: string,
+  recordHistory = true,
 ): AppState {
   const active = state.toolStatuses.find(status => status.id === id);
   if (!active || active.state !== 'running') return state;
@@ -1125,7 +1164,7 @@ function finalizeToolStep(
 
   return {
     ...state,
-    history: [...state.history, step],
+    history: recordHistory ? [...state.history, step] : state.history,
     toolStatuses: state.toolStatuses.map(status =>
       status.id === id
         ? {
@@ -1179,15 +1218,66 @@ function flushItemToHistory(history: HistoryItem[], item: FlushItem): HistoryIte
 
 // ===== Helpers =====
 
-function messagesToHistory(msgs: Array<import('@shenlan/core').Message>): HistoryItem[] {
-  return msgs
-    .filter(m => m.role !== 'system' && m.content)
-    .map((m, i) => ({
-      key: `${m.role}-${i}`,
-      role: m.role as HistoryItem['role'],
-      // 多模态 content 降为纯文本（历史展示形态；图片以占位表示）
-      content: typeof m.content === 'string' ? m.content : messageTextOf(m),
-    }));
+export function messagesToHistory(msgs: Array<import('@shenlan/core').Message>): HistoryItem[] {
+  const history: HistoryItem[] = [];
+  const shellCommandByCallId = new Map<string, string>();
+  let lastShell: { command: string; output: string; itemIndex: number } | null = null;
+
+  for (const [index, message] of msgs.entries()) {
+    for (const call of message.tool_calls ?? []) {
+      if (call.function.name !== 'shell') continue;
+      try {
+        const args = JSON.parse(call.function.arguments || '{}') as { command?: unknown };
+        if (typeof args.command === 'string') shellCommandByCallId.set(call.id, args.command.trim());
+      } catch { /* malformed historical arguments remain ungrouped */ }
+    }
+    if (message.role === 'system' || !message.content) continue;
+
+    const content = typeof message.content === 'string' ? message.content : messageTextOf(message);
+    const shellCommand = message.role === 'tool' && message.tool_call_id
+      ? shellCommandByCallId.get(message.tool_call_id)
+      : undefined;
+    if (shellCommand !== undefined) {
+      const activities = shellActivities(shellCommand);
+      if (activities.length) {
+        lastShell = null;
+        const result = shellActivityLines({ id: String(index), activities, phase: 'finished', output: content });
+        for (const [lineIndex, line] of result.lines.entries()) {
+          history.push({ key: `activity-${index}-${lineIndex}`, role: 'tool', content: line, toolError: result.failed || undefined });
+        }
+        continue;
+      }
+      const previous: { command: string; output: string; itemIndex: number } | null =
+        lastShell && lastShell.command === shellCommand ? lastShell : null;
+      const output = content;
+      const renderedOutput = previous
+        ? formatShellOutputChange(previous.output, output)
+        : output.split('\n').find(line => line.trim())?.trim() || '(no output)';
+      const shellItem: HistoryItem = {
+        key: `tool-shell-${index}`,
+        role: 'tool',
+        content: `shell ${shellCommand}: ${renderedOutput}`,
+      };
+      let itemIndex: number;
+      if (previous) {
+        itemIndex = previous.itemIndex;
+        history[itemIndex] = shellItem;
+      } else {
+        itemIndex = history.length;
+        history.push(shellItem);
+      }
+      lastShell = { command: shellCommand, output, itemIndex };
+      continue;
+    }
+
+    lastShell = null;
+    history.push({
+      key: `${message.role}-${index}`,
+      role: message.role as HistoryItem['role'],
+      content,
+    });
+  }
+  return history;
 }
 
 // ===== /goal 辅助 =====

@@ -6,12 +6,14 @@
  */
 import { registerTool } from './index.js';
 import type { ToolResult } from './index.js';
+import { debugLog } from '../debug-logger.js';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
 
 export interface TodoItem {
   content: string;
   status: TodoStatus;
+  group?: string;
 }
 
 let todos: TodoItem[] = [];
@@ -22,7 +24,9 @@ export function getTodos(): TodoItem[] {
 }
 
 export function clearTodos(): void {
+  const previousCount = todos.length;
   todos = [];
+  debugLog('Todo list cleared', { previousCount });
 }
 
 function normalizeStatus(status: unknown): TodoStatus {
@@ -32,7 +36,7 @@ function normalizeStatus(status: unknown): TodoStatus {
 registerTool({
   name: 'todo_write',
   description:
-    'Write and update the todo list for the current task. Replaces the entire list — always pass the full set of items with their current status. Use for tracking multi-step work.',
+    'Write and update the todo list for the current task. Replaces the entire list. Always pass all items and their current status. Set group to the parent subtask title (for example S3 Performance) so development, verification, documentation and commit items appear beneath that subtask in one tree.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -42,6 +46,7 @@ registerTool({
         items: {
           type: 'object',
           properties: {
+            group: { type: 'string', description: 'Parent subtask title shared by its development, verification, documentation and commit items' },
             content: {
               type: 'string',
               description: 'Description of the todo item',
@@ -70,11 +75,18 @@ registerTool({
         return {
           content: String(obj.content ?? ''),
           status: normalizeStatus(obj.status),
+          ...(typeof obj.group === 'string' && obj.group.trim() ? { group: obj.group.trim() } : {}),
         };
       });
     const inProgress = todos.filter(t => t.status === 'in_progress').length;
     const pending = todos.filter(t => t.status === 'pending').length;
     const completed = todos.filter(t => t.status === 'completed').length;
+    debugLog('Todo list updated', {
+      totalCount: todos.length,
+      inProgressCount: inProgress,
+      pendingCount: pending,
+      completedCount: completed,
+    });
     return {
       content: `Todo list updated (${todos.length} items: ${inProgress} in progress, ${pending} pending, ${completed} completed)`,
     };

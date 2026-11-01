@@ -6,7 +6,7 @@
  */
 import { Text, Box } from 'ink';
 import type { ReactNode } from 'react';
-import { renderInlineMd } from './MessageItem.js';
+import { renderInlineMd, renderOrderedListLine, renderTaskStatusLine } from './MessageItem.js';
 import { AssistantFrame } from './AssistantFrame.js';
 
 interface StreamingLineProps {
@@ -34,6 +34,9 @@ export function StreamingLine({ text, code, termWidth }: StreamingLineProps) {
  * 与完成态 MessageItem 观感一致；其余走行内渲染。
  */
 export function renderStreamingLine(text: string): ReactNode {
+  const taskStatusLine = renderTaskStatusLine(text);
+  if (taskStatusLine) return taskStatusLine;
+
   // 标题
   const hMatch = text.match(/^(#{1,6})\s+(.+)/);
   if (hMatch) {
@@ -71,14 +74,8 @@ export function renderStreamingLine(text: string): ReactNode {
   }
 
   // 有序列表（保留序号）
-  const olMatch = text.match(/^(\s*)(\d+)\.\s+(.+)/);
-  if (olMatch) {
-    return (
-      <Text>
-        {olMatch[1]}{olMatch[2]}. {renderInlineMd(olMatch[3])}
-      </Text>
-    );
-  }
+  const orderedListLine = renderOrderedListLine(text);
+  if (orderedListLine) return orderedListLine;
 
   // 引用
   const bqMatch = text.match(/^>\s?(.+)/);

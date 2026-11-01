@@ -10,7 +10,7 @@ import { Box, Text, useAnimation } from 'ink';
 import { useContext } from 'react';
 import { AppContext } from '../context.js';
 import type { ToolStatus, BgTaskStatus } from '../context.js';
-import type { TodoItem, PlanItem } from '@shenlan/core';
+import { visibleTaskItems, taskTreeRows, type TaskTreeRow } from '../task-tree.js';
 import { ToolStatusItem } from './ToolStatusItem.js';
 import { ConfirmPromptView } from './ConfirmPrompt.js';
 import { McpPanelView } from './McpPanel.js';
@@ -32,7 +32,7 @@ import {
   SLASH_MAX,
 } from '../dynamic-budget.js';
 
-const TAIL_PREFIX_WIDTH = 4; // "  │ " 的显示宽度
+const TAIL_PREFIX_WIDTH = 4; // 四列左缩进，与 AssistantFrame 正文起始列对齐
 /** 计划步骤在动态区最多显示行数 */
 export const PLAN_MAX = 5;
 
@@ -47,7 +47,7 @@ export function DynamicRegion() {
     : 0;
   const maxRows = maxDynamicRows(termHeight, inputLines, slashLines);
 
-  const runningTools = state.toolStatuses.filter(ts => ts.state === 'running');
+  const runningTools = state.toolStatuses.filter(ts => ts.state === 'running' || ts.grouped);
   const runningBg = state.bgTasks;
   const tail = state.streamingTail;
   const showTools = runningTools.length > 0 || runningBg.length > 0;
@@ -62,8 +62,8 @@ export function DynamicRegion() {
   const showTail = tail.length > 0;
   const showConfirm = state.phase === 'confirming' && !!state.confirmPrompt;
   const showError = !!state.error;
-  const showTodos = state.todos.length > 0;
-  const showPlan = state.plan.length > 0;
+  const taskItems = visibleTaskItems(state.todos, state.plan, state.taskListSource);
+  const taskRows = taskTreeRows(taskItems, 10);
 
   // 确认弹窗渲染在最后一条消息下方（对话流内，对齐 Claude Code CLI），
   // 确认期间 InputBox 隐藏（组件返回 null，useInput/usePaste hooks 保留捕获按键），
@@ -153,10 +153,8 @@ export function DynamicRegion() {
   if (showThinking) sections.push({ key: 'thinking', priority: 5, height: 1 });
   if (showTail) sections.push({ key: 'tail', priority: 3, height: 1 });
   if (showError) sections.push({ key: 'error', priority: 2, height: ERROR_MAX });
-  // plan/todos 优先级最低（thinking=5 同权后插，todos=6 最后丢弃），
-  // 空间不足时先丢 todos 再丢 plan，绝不影响 confirm/error/tail/tools/thinking
-  if (showPlan) sections.push({ key: 'plan', priority: 5, height: Math.min(PLAN_MAX, state.plan.length) });
-  if (showTodos) sections.push({ key: 'todos', priority: 6, height: 1 });
+  // One bounded task tree replaces the independent plan and todo lists.
+  if (taskRows.length) sections.push({ key: 'tasks', priority: 5, height: taskRows.length });
 
   if (sections.length === 0) return null;
 
@@ -165,8 +163,7 @@ export function DynamicRegion() {
   const thinkingRows = allocated.get('thinking') ?? 0;
   const tailRows = allocated.get('tail') ?? 0;
   const errorRows = allocated.get('error') ?? 0;
-  const planRows = allocated.get('plan') ?? 0;
-  const todosRows = allocated.get('todos') ?? 0;
+  const tasksRows = allocated.get('tasks') ?? 0;
 
   return (
     <Box flexDirection="column">
@@ -178,8 +175,7 @@ export function DynamicRegion() {
       )}
       {showTail && tailRows > 0 && renderTail(tail, termWidth, state.streamFenceOpen)}
       {showError && errorRows > 0 && renderError(state.error!, errorRows, termWidth)}
-      {showPlan && planRows > 0 && renderPlan(state.plan, planRows, termWidth)}
-      {showTodos && todosRows > 0 && renderTodos(state.todos, termWidth)}
+      {tasksRows > 0 && renderTaskTree(taskTreeRows(taskItems, tasksRows), termWidth)}
     </Box>
   );
 }
@@ -238,7 +234,7 @@ function renderTail(tail: string, termWidth: number, inCode: boolean) {
   const maxWidth = Math.max(8, termWidth - TAIL_PREFIX_WIDTH - 1);
   return (
     <Box key="tail" flexDirection="row" height={1} flexShrink={0}>
-      <Text dimColor>  │ </Text>
+      <Text>{'    '}</Text>
       {inCode
         ? <Text dimColor>{capLine(tail, maxWidth)}</Text>
         : renderStreamingLine(capLine(tail, maxWidth))}
@@ -259,36 +255,15 @@ function renderError(error: string, lines: number, termWidth: number) {
   );
 }
 
-/** 计划步骤：最多 PLAN_MAX 行，逐行按终端宽度截断 */
-function renderPlan(plan: PlanItem[], lines: number, termWidth: number) {
-  const maxWidth = Math.max(8, termWidth - 6);
-  const shown = plan.slice(0, lines);
+/** Render parent subtasks with their own development items directly beneath them. */
+function renderTaskTree(rows: TaskTreeRow[], termWidth: number) {
   return (
-    <Box key="plan" flexDirection="column" height={lines} overflow="hidden" flexShrink={0}>
-      {shown.map((item, i) => {
-        const mark = item.status === 'completed'
-          ? '[✓]'
-          : item.status === 'in_progress'
-            ? '[→]'
-            : '[ ]';
-        return (
-          <Text key={i}>  {mark} {capLine(item.step, maxWidth)}</Text>
-        );
-      })}
-    </Box>
-  );
-}
-
-/** 待办清单：单行摘要，按终端宽度截断 */
-function renderTodos(todos: TodoItem[], termWidth: number) {
-  const pending = todos.filter(t => t.status === 'pending').length;
-  const inProgress = todos.filter(t => t.status === 'in_progress').length;
-  const completed = todos.filter(t => t.status === 'completed').length;
-  const line = `todos: ${pending} pending · ${inProgress} in progress · ${completed} done`;
-  const maxWidth = Math.max(8, termWidth - 3);
-  return (
-    <Box key="todos" height={1} flexShrink={0}>
-      <Text dimColor>  {capLine(line, maxWidth)}</Text>
+    <Box key="tasks" flexDirection="column" height={rows.length} overflow="hidden" flexShrink={0}>
+      {rows.map(row => (
+        <Text key={row.key} dimColor={row.status === 'pending'} color={row.status === 'completed' ? 'green' : row.status === 'in_progress' ? 'yellow' : undefined}>
+          {capLine(`${'  '.repeat(row.depth + 1)}${row.key === 'overflow' ? '' : row.status === 'completed' ? '✔ ' : row.status === 'in_progress' ? '▶ ' : '☐ '}${row.text}`, Math.max(1, termWidth - 1))}
+        </Text>
+      ))}
     </Box>
   );
 }

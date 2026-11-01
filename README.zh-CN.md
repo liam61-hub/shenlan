@@ -426,7 +426,7 @@ npm run clean
 
 ## 版本
 
-当前 **v0.4.90**（以 [CHANGELOG.md](./CHANGELOG.md) 为准）
+当前 **v0.5.0**（以 [CHANGELOG.md](./CHANGELOG.md) 为准）
 
 ## License
 

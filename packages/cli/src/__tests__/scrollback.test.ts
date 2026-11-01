@@ -331,6 +331,32 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
     expect(bytes).toContain('\x1b[31m');
   });
 
+  it('多阶段进度的运行中状态与阶段/验证结果都显示在滚动区', () => {
+    const stdout = makeTtyStream('stdout');
+    const stdin = makeTtyStream('stdin');
+    const chunks: Buffer[] = [];
+    stdout.on('data', (c: Buffer) => chunks.push(Buffer.from(c)));
+    const state = baseState({
+      toolStatuses: [{ id: 'progress-1', name: 'task_progress', detail: 'Implementation', state: 'running', startTime: Date.now() }],
+      history: [
+        { key: 'p1', role: 'tool', content: 'task_progress: Progress recorded: stage started — Implementation' },
+        { key: 'p2', role: 'tool', content: 'task_progress: Progress recorded: stage in_progress — Implementation' },
+        { key: 'p3', role: 'tool', content: 'task_progress: Progress recorded: stage completed — Implementation' },
+        { key: 'p4', role: 'tool', content: 'task_progress: Progress recorded: verification failed — Tests (2 failed)' },
+      ],
+    });
+
+    const { unmount } = render(tree(state), {
+      stdout, stdin, patchConsole: false, exitOnCtrlC: false, interactive: true,
+    });
+    unmount();
+
+    const bytes = Buffer.concat(chunks).toString('utf8');
+    for (const marker of ['task_progress', 'stage started', 'stage in_progress', 'stage completed', 'verification failed']) {
+      expect(bytes).toContain(marker);
+    }
+  });
+
   it('工具失败按新口径渲染：普通结果样式（无 ✖ 红字、无红色 ANSI）', () => {
     const stdout = makeTtyStream('stdout');
     const stdin = makeTtyStream('stdin');
@@ -458,11 +484,13 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
     // 硬性规则：plan+todos+tail 叠加也不触发整屏清空 / 备用屏幕
     expect(bytes).not.toContain(CLEAR_TERMINAL);
     expect(bytes).not.toContain('\x1b[?1049h');
-    // 摘要与步骤前缀渲染
-    expect(bytes).toContain('todos: 1 pending · 1 in progress · 1 done');
-    expect(bytes).toContain('[ ]');
-    expect(bytes).toContain('[→]');
-    expect(bytes).toContain('[✓]');
+    expect(bytes).not.toContain('│');
+    // The same task list is no longer repeated as independent plan/todo sections.
+    expect(bytes).not.toContain('todos:');
+    expect(bytes).toContain('☐ 1. a');
+    expect(bytes).toContain('▶ 2. b');
+    expect(bytes).toContain('✔ 3. c');
+    expect(bytes).not.toContain('步骤二');
   });
 
   it('确认弹窗 + plan + todos + 超长 tail：帧高预算内无整屏清屏', () => {
@@ -578,6 +606,31 @@ describe('原生滚动回滚区（<Static> + 有界动态区）', () => {
     const bytes = Buffer.concat(chunks).toString('utf8');
     expect(bytes).not.toContain(CLEAR_TERMINAL);
     expect(countOccurrences(bytes, 'static line')).toBe(1);
+  });
+
+  it('普通打字只更新输入框本地状态，回显即时且 Enter 提交完整文本', async () => {
+    const stdout = makeTtyStream('stdout');
+    const stdin = makeTtyStream('stdin');
+    const chunks: Buffer[] = [];
+    stdout.on('data', (c: Buffer) => chunks.push(Buffer.from(c)));
+    const actions: Array<{ type: string; input?: string }> = [];
+
+    const app = render(
+      React.createElement(LiveTuiHarness, {
+        onAction: a => actions.push(a as { type: string; input?: string }),
+      }),
+      { stdout, stdin, patchConsole: false, exitOnCtrlC: false, interactive: true },
+    );
+    await new Promise(r => setTimeout(r, 50));
+
+    stdin.write('hello');
+    await waitUntil(() => Buffer.concat(chunks).toString('utf8').includes('hello'), 2000);
+    expect(actions.some(a => a.type === 'SET_INPUT')).toBe(false);
+
+    stdin.write('\r');
+    await waitUntil(() => actions.some(a => a.type === 'SUBMIT_INPUT'), 2000);
+    expect(actions.find(a => a.type === 'SUBMIT_INPUT')?.input).toBe('hello');
+    app.unmount();
   });
 
   it('bracketed paste：整段插入输入框、保留换行、不触发提交', async () => {
@@ -1374,3 +1427,107 @@ function buildConfirmPrompt() {
     feedbackText: '',
   };
 }
+
+describe('live read group display', () => {
+  it('keeps the latest completed target visible between reads without clearing scrollback', () => {
+    const stdout = makeTtyStream('stdout');
+    const stdin = makeTtyStream('stdin');
+    const chunks: Buffer[] = [];
+    stdout.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    const { unmount } = render(tree(baseState({
+      phase: 'thinking',
+      toolStatuses: [{ id: 'latest', name: 'read', detail: 'tests/metrics.rs',
+        state: 'done', grouped: true, startTime: 100, endTime: 200 }],
+    })), { stdout, stdin, patchConsole: false, exitOnCtrlC: false, interactive: true });
+    unmount();
+    const bytes = Buffer.concat(chunks).toString('utf8');
+    expect(bytes).toContain('metrics.rs');
+    expect(bytes).toContain('✔');
+    expect(bytes).not.toContain(CLEAR_TERMINAL);
+    expect(bytes).not.toContain('\x1b[3J');
+  });
+});
+
+describe('visible subtask checklist', () => {
+  it('renders five task titles in their original order', () => {
+    const stdout = makeTtyStream('stdout');
+    const stdin = makeTtyStream('stdin');
+    const chunks: Buffer[] = [];
+    stdout.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    const { unmount } = render(tree(baseState({
+      phase: 'thinking',
+      todos: [
+        { content: 'Push changes', status: 'completed' },
+        { content: 'Diagnose flaky test', status: 'in_progress' },
+        { content: 'Fix root cause', status: 'pending' },
+        { content: 'Harden test infrastructure', status: 'pending' },
+        { content: 'Run full verification', status: 'pending' },
+      ],
+    })), { stdout, stdin, patchConsole: false, exitOnCtrlC: false, interactive: true });
+    unmount();
+    const bytes = Buffer.concat(chunks).toString('utf8');
+    for (const title of ['Push changes', 'Diagnose flaky test', 'Fix root cause', 'Harden test infrastructure', 'Run full verification']) {
+      expect(bytes).toContain(title);
+    }
+    expect(bytes.indexOf('Push changes')).toBeLessThan(bytes.indexOf('Diagnose flaky test'));
+    expect(bytes).not.toContain(CLEAR_TERMINAL);
+  });
+
+  it('shows the active task with one available row and bounds large lists', () => {
+    for (const height of [8, 20]) {
+      const stdout = makeTtyStream('stdout');
+      const stdin = makeTtyStream('stdin');
+      const chunks: Buffer[] = [];
+      stdout.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      const state = baseState({ todos: Array.from({ length: 25 }, (_, i) => ({
+        content: i === 24 ? 'Current task' : `Pending task ${i}`,
+        status: i === 24 ? 'in_progress' as const : 'pending' as const,
+      })) });
+      const { unmount } = render(React.createElement(TuiHarness, { state, termHeight: height }), {
+        stdout, stdin, patchConsole: false, exitOnCtrlC: false, interactive: true,
+      });
+      unmount();
+      const bytes = Buffer.concat(chunks).toString('utf8');
+      expect(bytes).toContain('Current task');
+      expect(bytes).toContain('… +');
+      expect(bytes).not.toContain(CLEAR_TERMINAL);
+    }
+  });
+});
+
+describe('subtask tree terminal layout', () => {
+  it('nests current development items under S3 without a second flat checklist', () => {
+    for (const height of [12, 40]) {
+      const stdout = makeTtyStream('stdout');
+      const stdin = makeTtyStream('stdin');
+      const chunks: Buffer[] = [];
+      stdout.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      const state = baseState({
+        taskListSource: 'todos',
+        plan: [{ step: 'Stale separate plan', status: 'in_progress' }],
+        todos: [
+          { group: 'S1 Verify', content: 'Build and test', status: 'completed' },
+          { group: 'S2 Coverage', content: 'HEAD and Range', status: 'completed' },
+          { group: 'S3 Performance', content: 'Measure stat overhead', status: 'in_progress' },
+          { group: 'S3 Performance', content: 'Commit benchmark', status: 'pending' },
+        ],
+      });
+      const { unmount } = render(React.createElement(TuiHarness, { state, termHeight: height }), {
+        stdout, stdin, patchConsole: false, exitOnCtrlC: false, interactive: true,
+      });
+      unmount();
+      const bytes = Buffer.concat(chunks).toString('utf8');
+      const plain = bytes.replace(/\x1b\[[?0-9;]*[A-Za-z]/g, '');
+      expect(countOccurrences(plain, 'S3 Performance')).toBe(1);
+      expect(plain).toContain('▾ S3 Performance');
+      expect(plain).toContain('    ▶ 3. Measure stat overhead');
+      expect(plain).toContain('    ☐ 4. Commit benchmark');
+      expect(plain.indexOf('S3 Performance')).toBeLessThan(plain.indexOf('Measure stat overhead'));
+      expect(plain).not.toContain('Stale separate plan');
+      expect(plain).not.toContain('Build and test');
+      expect(plain).not.toContain('todos:');
+      expect(bytes).not.toContain(CLEAR_TERMINAL);
+      expect(bytes).not.toContain('\x1b[3J');
+    }
+  });
+});

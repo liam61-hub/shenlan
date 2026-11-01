@@ -4,7 +4,7 @@
  * 按操作类型渲染上下文相关的标题与选项：
  *   - edit：文件列表 + Yes / 这些文件不再询问 / 说明原因
  *   - command：Environment + $ 命令 + Yes / 同类命令不再询问 / 说明原因
- *   - plan：Yes, implement / Yes, clear context / No, stay in Plan mode
+ *   - plan：choose an implementation permission mode or stay in Plan mode
  *
  * “No, and tell me what to do differently” 选中后进入反馈输入模式，
  * 用户的说明会作为 tool 结果回传给模型（repl.ts 处理 deny_feedback）。
@@ -21,9 +21,21 @@ const PLAN_LABEL_PAD = 34;
 
 /** plan 选项右侧描述（与 Codex CLI 一致） */
 const PLAN_HINTS = {
-  en: { '1': 'Switch to Default and start coding.', '2': 'Fresh thread.', '3': 'Continue planning with the model.' },
-  'zh-CN': { '1': '切换到正常模式并开始实施。', '2': '使用全新上下文。', '3': '继续规划。' },
-};
+  en: {
+    '1': 'Ask before writes and commands.',
+    '2': 'Auto-accept edits; ask before commands.',
+    '3': 'Skip permission prompts.',
+    '4': 'Fresh context in Normal mode.',
+    '5': 'Continue planning.',
+  },
+  'zh-CN': {
+    '1': '写入和命令仍需确认。',
+    '2': '自动允许文件编辑，命令仍需确认。',
+    '3': '跳过权限确认。',
+    '4': '清空上下文后以 Normal 实施。',
+    '5': '继续规划。',
+  },
+} as const;
 
 export function ConfirmPromptView({ prompt }: { prompt: ConfirmPrompt }) {
   const isPlan = prompt.kind === 'plan';
@@ -76,7 +88,7 @@ export function ConfirmPromptView({ prompt }: { prompt: ConfirmPrompt }) {
         const isSelected = i === prompt.selected;
         const label = capLine(opt.label, LABEL_MAX_WIDTH);
         if (isPlan) {
-          const hint = PLAN_HINTS[language][opt.key as '1' | '2' | '3'] || '';
+          const hint = PLAN_HINTS[language][opt.key as keyof typeof PLAN_HINTS.en] || '';
           const pad = Math.max(1, PLAN_LABEL_PAD - displayWidth(label) + (isSelected ? 1 : 0));
           return (
             <Box key={opt.key}>

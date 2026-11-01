@@ -279,7 +279,7 @@ describe('buildConfigRows / configPanelSet / configPanelUnset / reloadConfigInPl
     expect(out).not.toContain('界面语言');
     const rows = buildConfigRows(loadConfig(cwd), cwd);
     expect(rows.find((r) => r.key === 'language')?.description).toBe('UI language (en / zh-CN)');
-    expect(rows.find((r) => r.key === 'agent.maxSteps')?.description).toBe('Agent loop max steps');
+    expect(rows.find((r) => r.key === 'agent.maxSteps')?.description).toBe('Headless agent run max steps');
   });
 
   it('language=zh-CN 时切换为中文描述', () => {
@@ -289,7 +289,7 @@ describe('buildConfigRows / configPanelSet / configPanelUnset / reloadConfigInPl
     expect(out).toContain('界面语言（en / zh-CN）');
     const rows = buildConfigRows(loadConfig(cwd), cwd);
     expect(rows.find((r) => r.key === 'language')?.description).toBe('界面语言（en / zh-CN）');
-    expect(rows.find((r) => r.key === 'agent.maxSteps')?.description).toBe('Agent 循环步数上限');
+    expect(rows.find((r) => r.key === 'agent.maxSteps')?.description).toBe('无界面单次 Agent 运行步数上限');
   });
 
   it('language 非法取值被校验拒绝', () => {

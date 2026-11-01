@@ -31,7 +31,6 @@ const SAMPLE_BASE: Record<string, unknown> = {
   mcpServers: [],
   agent: {
     maxSteps: 80,
-    goalMaxSteps: 300,
   },
   context: {
     autoCompactTokenLimit: 200_000,

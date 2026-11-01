@@ -12,6 +12,7 @@ export type PlanStatus = 'pending' | 'in_progress' | 'completed';
 export interface PlanItem {
   step: string;
   status: PlanStatus;
+  group?: string;
 }
 
 let plan: PlanItem[] = [];
@@ -32,7 +33,7 @@ function normalizeStatus(status: unknown): PlanStatus {
 registerTool({
   name: 'update_plan',
   description:
-    'Update the execution plan for the current task. Replaces the entire plan — always pass the full set of steps with their current status. Use before and while implementing multi-step work.',
+    'Update the execution plan for the current task. Replaces the entire plan — always pass the full set of steps with their current status. For multi-step work, mark a step in_progress when starting it, then completed only after its work and required verification are actually finished; immediately mark the next step in_progress. Refresh the plan after changes. Never infer completion from a single tool call.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -42,6 +43,7 @@ registerTool({
         items: {
           type: 'object',
           properties: {
+            group: { type: 'string', description: 'Parent subtask title; use the same group for related development, verification, documentation and commit items' },
             step: {
               type: 'string',
               description: 'Description of the plan step',
@@ -70,6 +72,7 @@ registerTool({
         return {
           step: String(obj.step ?? ''),
           status: normalizeStatus(obj.status),
+          ...(typeof obj.group === 'string' && obj.group.trim() ? { group: obj.group.trim() } : {}),
         };
       });
     const inProgress = plan.filter(p => p.status === 'in_progress').length;

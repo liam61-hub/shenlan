@@ -29,3 +29,15 @@ export function commandMatchesGrant(command: string, grant: CommandGrant): boole
   const current = commandGrant(command);
   return grant.family ? current.family && current.key === grant.key : current.key === grant.key;
 }
+
+/** Exact, side-effect-free shell forms that are safe to repeat without prompting. */
+export function isAutoAllowedReadOnlyCommand(command: string): boolean {
+  const normalized = command.trim().replace(/\s+/g, ' ');
+  return new Set([
+    'pwd',
+    'git status',
+    'git status --short',
+    'git status --porcelain',
+    'git status --porcelain -b --short',
+  ]).has(normalized);
+}

@@ -86,3 +86,14 @@ describe('todo_write 工具', () => {
     expect(getTodos()).toEqual([]);
   });
 });
+
+it('preserves parent subtask labels for grouped development items', async () => {
+  await tool.execute({ todos: [
+    { content: 'Develop cache integration', status: 'in_progress', group: ' S3 Performance ' },
+    { content: 'Verify A/B results', status: 'pending', group: 'S3 Performance' },
+  ] });
+  expect(getTodos().map(item => item.group)).toEqual(['S3 Performance', 'S3 Performance']);
+  const copy = getTodos();
+  copy[0].group = 'changed';
+  expect(getTodos()[0].group).toBe('S3 Performance');
+});

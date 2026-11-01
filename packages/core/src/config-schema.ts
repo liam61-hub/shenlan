@@ -105,13 +105,8 @@ export const CONFIG_KEYS: Record<string, ConfigKeyMeta> = {
   },
   'agent.maxSteps': {
     type: 'number',
-    description: { en: 'Agent loop max steps', zh: 'Agent 循环步数上限' },
+    description: { en: 'Headless agent run max steps', zh: '无界面单次 Agent 运行步数上限' },
     default: 80,
-  },
-  'agent.goalMaxSteps': {
-    type: 'number',
-    description: { en: '/goal long-task max steps', zh: '/goal 长任务模式的步数上限' },
-    default: 300,
   },
   'agent.maxBackground': {
     type: 'number',
